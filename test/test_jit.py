@@ -1384,5 +1384,41 @@ class TestJit(TestCase):
         outputs = Variable(torch.IntTensor([1, 2]), requires_grad=True)
         self.checkScript(script, 'to_int', [x], [outputs], False)
 
+    def test_script_while(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_while(a, b) -> (c):
+            while a < 10:
+                a = a + 1
+                b = b + 1
+            c = a + b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_while')))
+
+    def test_script_fibb(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_while(lim) -> (third):
+            first = 1
+            second = 1
+            i = 1
+            somenum = 5
+            dontmutateme = 3
+            third = 0 # TODO: python lexical scoping
+            while i < lim:
+                third = first + second
+                first = second
+                second = third
+                j = 0
+                while j < 10:
+                    somenum *= 2
+                    j += 1
+                i = i + j
+                i = i + dontmutateme
+
+            st = second + third
+            fs = first + second
+
+        ''')
+        self.assertExpected(str(cu.get_graph('test_while')))
+
 if __name__ == '__main__':
     run_tests()
