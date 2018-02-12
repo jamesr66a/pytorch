@@ -34,21 +34,125 @@ using ListAttributeMap = std::unordered_map<
     std::string,
     std::pair<const std::vector<double>, std::string>>;
 
+// Keep track of environment as we descend down nested control
+// structures.
+struct Environment {
+  Environment(Block* b, std::shared_ptr<Environment> next = nullptr)
+      : b(b), next(next) {}
+
+  std::vector<std::string> captured_inputs;
+  ValueTable value_table;
+  Block* b;
+
+  std::shared_ptr<Environment> next;
+
+  Value* findInThisFrame(const std::string& name) {
+    if (value_table.count(name)) {
+      return value_table.at(name);
+    }
+    return nullptr;
+  }
+
+  Value* findInParentFrame(const std::string& name) {
+    for (auto runner = next; runner; runner = runner->next) {
+      if (runner->value_table.count(name)) {
+        return runner->value_table.at(name);
+      }
+    }
+    return nullptr;
+  }
+
+  Value* createCapturedInput(const std::string& name) {
+    // Create the input
+    Value* new_input = b->addInput();
+
+    // Associate this name with this value
+    value_table[name] = new_input;
+
+    // List as a positional input
+    captured_inputs.push_back(name);
+
+    return new_input;
+  }
+
+  Symbol getBlockOwningKind() {
+    Symbol owning_kind = Symbol();
+    if (b->owningNode()) {
+      owning_kind = b->owningNode()->kind();
+    }
+    return owning_kind;
+  }
+
+  void setVar(const std::string& name, Value* value) {
+    if (!findInThisFrame(name) && findInParentFrame(name) &&
+        getBlockOwningKind() == Symbol("Loop"))
+      createCapturedInput(name);
+    value_table[name] = value;
+  }
+
+  Value* getVar(const Ident& ident) {
+    return getVar(ident.name(), ident);
+  }
+
+  Value* getVar(const std::string& ident, const TreeView& tv) {
+    Value* retval = findInThisFrame(ident);
+
+    if (!retval && (retval = findInParentFrame(ident)) &&
+        getBlockOwningKind() == Symbol("Loop"))
+      retval = createCapturedInput(ident);
+
+    if (!retval) {
+      throw ErrorReport(tv) << "undefined value " << ident;
+    }
+
+    return retval;
+  }
+
+  // Given that after emitting statements in a block, we've added block inputs
+  // for all value references and assignments, delete inputs for which there was
+  // no assignment, only references.
+  void deleteExtraInputs() {
+    std::vector<size_t> inputs_to_delete;
+    int i = 0;
+    for (const auto& x : captured_inputs) {
+      if (b->inputs()[i] == value_table[x]) {
+        inputs_to_delete.push_back(i);
+      }
+      i++;
+    }
+
+    for (auto ritr = inputs_to_delete.rbegin(); ritr != inputs_to_delete.rend();
+         ++ritr) {
+      auto name = captured_inputs[*ritr];
+      Value* v = value_table[name];
+      Value* orig = findInParentFrame(name);
+      // Replace all matching node inputs with original value
+      // from an enclosing scope
+      v->replaceAllUsesWith(orig);
+
+      // Actually remove the input
+      b->eraseInput(*ritr);
+      captured_inputs.erase(captured_inputs.begin() + *ritr);
+    }
+  }
+};
+
 struct to_ir {
   to_ir(FunctionDefinition& def, FunctionTable& function_table)
       : def(def), function_table(function_table) {
+    environment_stack = std::make_shared<Environment>(def.graph->block());
     // populate def->graph
     auto& tree = *def.tree;
     for (auto input : tree.params()) {
       auto& name = input.ident().name();
-      setVar(name, def.graph->addInput(name));
+      environment_stack->setVar(name, def.graph->addInput(name));
     }
     emitStatements(tree.statements());
     for (auto output : tree.returns()) {
-      def.graph->registerOutput(getVar(output.ident()));
+      def.graph->registerOutput(environment_stack->getVar(output.ident()));
     }
   }
-  void emitStatements(const ListView<TreeRef>& statements) {
+  void emitStatements(const List<TreeRef>& statements) {
     for (auto stmt : statements) {
       switch (stmt->kind()) {
         case TK_IF:
@@ -63,23 +167,115 @@ struct to_ir {
         case TK_GLOBAL:
           for (auto ident : stmt->trees()) {
             const auto& name = Ident(ident).name();
-            setVar(name, def.graph->addInput(name));
+            environment_stack->setVar(name, def.graph->addInput(name));
           }
           break;
-        default:
-          emitExpr(stmt, 0);
+        case TK_EXPR_STMT:
+          emitExpr(ExprStmt(stmt).expr(), 0);
           break;
       }
     }
   }
+
+  std::shared_ptr<Environment> emitSingleIfBranch(
+      Block* b,
+      const List<TreeRef> branch,
+      std::unordered_set<std::string>* mutated_parent_values) {
+    environment_stack = std::make_shared<Environment>(b, environment_stack);
+    WithInsertPoint guard(*def.graph, b);
+    emitStatements(branch);
+
+    for (const auto& kv : environment_stack->value_table) {
+      if (environment_stack->findInParentFrame(kv.first)) {
+        mutated_parent_values->insert(kv.first);
+      }
+    }
+    auto save_env = environment_stack;
+    environment_stack = environment_stack->next;
+    return save_env;
+  }
+
   void emitIf(const If& stmt) {
-    // TODO: add support for control flow ops
-    throw ErrorReport(stmt) << "Control flow is not supported yet.";
+    Value* cond_value = emitExpr(stmt.cond(), 1)[0];
+
+    Node* n = def.graph->insertNode(def.graph->create(Symbol("If"), 0));
+    n->addInput(cond_value);
+    auto* true_block = n->addBlock();
+    auto* false_block = n->addBlock();
+
+    // Emit both blocks once to get the union of all mutated values
+    std::unordered_set<std::string> mutated_parent_values;
+    std::shared_ptr<Environment> save_true, save_false;
+    save_true = emitSingleIfBranch(
+        true_block, static_cast<List<TreeRef>>(stmt.trueBranch()), &mutated_parent_values);
+    save_false = emitSingleIfBranch(
+        false_block, static_cast<List<TreeRef>>(stmt.falseBranch()), &mutated_parent_values);
+
+    std::vector<std::string> sorted_mutations(
+        mutated_parent_values.begin(), mutated_parent_values.end());
+    std::sort(sorted_mutations.begin(), sorted_mutations.end());
+
+    // Register outputs in each block
+    environment_stack = save_true;
+    for (const auto& x : sorted_mutations) {
+      true_block->registerOutput(environment_stack->getVar(x, stmt));
+    }
+    environment_stack = save_false;
+    for (const auto& x : sorted_mutations) {
+      false_block->registerOutput(environment_stack->getVar(x, stmt));
+    }
+    environment_stack = environment_stack->next;
+
+    // Add op outputs
+    for (const auto& x : sorted_mutations) {
+      environment_stack->setVar(x, n->addOutput());
+    }
   }
 
   void emitWhile(const While& stmt) {
-    // TODO: add support for control flow ops
-    throw ErrorReport(stmt) << "Control flow is not supported yet.";
+    // TODO: scan outputs
+
+    Value* trip_count_dummy = emitConst(0, "i")[0];
+    Value* cond_value = emitExpr(stmt.cond(), 1)[0];
+
+    Node* n = def.graph->insertNode(def.graph->create(Symbol("Loop"), 0));
+    n->addInput(trip_count_dummy);
+    n->addInput(cond_value);
+    auto* body_block = n->addBlock();
+
+    // TODO iteration num and condition
+
+    {
+      environment_stack =
+          std::make_shared<Environment>(body_block, environment_stack);
+      WithInsertPoint guard(*def.graph, body_block);
+      emitStatements(static_cast<List<TreeRef>>(stmt.body()));
+
+      // Also emit the conditional
+      Value *body_cond_value = emitExpr(stmt.cond(), 1)[0];
+      body_block->registerOutput(body_cond_value);
+
+      // Remove inputs for values that did not mutate within the
+      // block
+      environment_stack->deleteExtraInputs();
+
+      // Add block outputs
+      auto& curr_frame = *environment_stack;
+      for (const auto& x : curr_frame.captured_inputs) {
+        body_block->registerOutput(curr_frame.value_table[x]);
+      }
+
+      auto preserve_captured_inputs = curr_frame.captured_inputs;
+
+      // Drop out of block environment
+      environment_stack = environment_stack->next;
+
+      // Add op inputs
+      for (const auto& x : preserve_captured_inputs) {
+        n->addInput(environment_stack->getVar(x, stmt));
+        environment_stack->setVar(x, n->addOutput());
+      }
+    }
   }
 
   std::vector<Value*> emitAssignment(const Assign& stmt) {
@@ -99,21 +295,10 @@ struct to_ir {
     }
     int i = 0;
     for (auto ident : stmt.lhs()) {
-      if (ident->kind() == TK_IDENT)
-        setVar(Ident(ident).name(), outputs.at(i));
+      environment_stack->setVar(Ident(ident).name(), outputs.at(i));
       i++;
     }
     return outputs;
-  }
-
-  void setVar(const std::string& name, Value* value) {
-    value_table[name] = value;
-  }
-
-  Value* getVar(const Ident& ident) {
-    if (value_table.count(ident.name()) == 0)
-      throw ErrorReport(ident) << "undefined value " << ident.name();
-    return value_table[ident.name()];
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -174,7 +359,7 @@ struct to_ir {
     }
     for (auto* node : fn.graph->nodes()) {
       auto* new_node =
-          def.graph->appendNode(def.graph->createClone(node, value_map_func));
+          def.graph->insertNode(def.graph->createClone(node, value_map_func));
       for (size_t i = 0; i < node->outputs().size(); ++i) {
         value_map[node->outputs()[i]] = new_node->outputs()[i];
         new_node->outputs()[i]->copyMetadata(node->outputs()[i]);
@@ -205,9 +390,9 @@ struct to_ir {
       const TreeRef& tree,
       const size_t output_size = 0) {
     switch (tree->kind()) {
-      case TK_IDENT: {
+      case TK_VAR: {
         expectOutputs(tree, output_size, 1);
-        return {getVar(Ident(tree))};
+        return {environment_stack->getVar(Var(tree).name())};
       } break;
       case TK_NE:
       case TK_EQ:
@@ -246,20 +431,20 @@ struct to_ir {
           ListAttributeMap list_attributes{};
           for (const auto& attr : apply.attributes()) {
             const auto& name = attr.name().name();
-            const auto& value = attr.value();
+            const Expr& value = attr.value();
             // TODO: handle non-float attributes
-            switch (value->kind()) {
+            switch (value.kind()) {
               case TK_CONST: {
-                auto v = value->tree(0)->doubleValue();
-                const auto& type = value->tree(1)->stringValue();
+                auto v = value.get()->tree(0)->doubleValue();
+                const auto& type = value.get()->tree(1)->stringValue();
                 attributes.insert({name, {v, type}});
               } break;
               case TK_LIST:
                 std::vector<double> vs{};
-                for (const auto& tree : value->trees()) {
+                for (const auto& tree : value.get()->trees()) {
                   vs.push_back(tree->tree(0)->doubleValue());
                 }
-                const auto& type = value->trees()[0]->tree(1)->stringValue();
+                const auto& type = value.get()->trees()[0]->tree(1)->stringValue();
                 list_attributes.insert({name, {std::move(vs), type}});
             }
             break;
@@ -304,9 +489,9 @@ struct to_ir {
     }
   }
 
-  std::vector<Value*> emitCast(const TreeRef& input, int type) {
+  std::vector<Value*> emitCast(const TreeRef& input, const ScalarType& type) {
     at::ScalarType t;
-    switch (type) {
+    switch (type.kind()) {
       case TK_INT:
         t = at::kInt;
         break;
@@ -349,7 +534,7 @@ struct to_ir {
       const size_t output_size,
       const AttributeMap& attributes = {},
       const ListAttributeMap& list_attributes = {}) {
-    Node* n = def.graph->appendNode(def.graph->create(kind, output_size));
+    Node* n = def.graph->insertNode(def.graph->create(kind, output_size));
     for (auto* input_value : inputs) {
       n->addInput(input_value);
     }
@@ -419,11 +604,14 @@ struct to_ir {
 
   FunctionDefinition& def; // the def being constructed
   FunctionTable& function_table;
-  ValueTable value_table;
+
+  // Singly-linked list of environments. This top element contains a member
+  // `next` that points to the most immediate enclosing scope's value.
+  std::shared_ptr<Environment> environment_stack;
 
  private:
   Value* createConstant(const at::Tensor& val) {
-    return def.graph->appendNode(def.graph->createConstant(val))->output();
+    return def.graph->insertNode(def.graph->createConstant(val))->output();
   }
 };
 
