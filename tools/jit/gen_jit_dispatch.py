@@ -44,6 +44,7 @@ CONSTRUCTOR = CodeTemplate("""\
     auto result = ${call};
     drop(stack, ${num_inputs});
     pack(stack, std::move(result));
+    return 0;
   }, "${name}", ${num_inputs});
 }},
 """)
