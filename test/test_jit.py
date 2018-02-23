@@ -1319,7 +1319,7 @@ class TestJit(TestCase):
         a = Variable(torch.rand(1), requires_grad=True)
         b = Variable(torch.rand(1), requires_grad=True)
         outputs = a + b + a
-        self.checkScript(script, [a, b], [outputs], False)
+        self.checkScript(script, [a, b], [outputs], True)
 
     def test_script_mul(self):
         script = '''
@@ -1330,7 +1330,7 @@ class TestJit(TestCase):
         a = Variable(torch.rand(1), requires_grad=True)
         b = Variable(torch.rand(1), requires_grad=True)
         outputs = a * b
-        self.checkScript(script, [a, b], [outputs], False)
+        self.checkScript(script, [a, b], [outputs], True)
 
     def test_script_triple(self):
         script = '''
@@ -1339,7 +1339,7 @@ class TestJit(TestCase):
         '''
         x = Variable(torch.rand(1).float(), requires_grad=True)
         outputs = 3 * x
-        self.checkScript(script, [x], [outputs], False)
+        self.checkScript(script, [x], [outputs], True)
 
     def test_script_slice(self):
         script = '''
@@ -1348,7 +1348,7 @@ class TestJit(TestCase):
         '''
         x = Variable(torch.rand(10).float(), requires_grad=True)
         outputs = x[:5]
-        self.checkScript(script, [x], [outputs], False)
+        self.checkScript(script, [x], [outputs], True)
 
     def test_script_gather(self):
         script = '''
@@ -1357,7 +1357,7 @@ class TestJit(TestCase):
         '''
         x = Variable(torch.rand(10).float(), requires_grad=True)
         outputs = x[0]
-        self.checkScript(script, [x], [outputs], False)
+        self.checkScript(script, [x], [outputs], True)
 
     def test_script_func_call(self):
         script = '''
@@ -1375,6 +1375,8 @@ class TestJit(TestCase):
         x = Variable(torch.rand(3).float(), requires_grad=True)
         y = Variable(torch.rand(3).float(), requires_grad=True)
         outputs = alpha * x + beta * y
+        # note - cannot optimize yet because broadcasts are not inserted
+        # before the fuser runs
         self.checkScript(script, [alpha, beta, x, y], [outputs], False)
 
     @unittest.skip("RuntimeError: VariableType::ID() not implemented")
@@ -1385,7 +1387,7 @@ class TestJit(TestCase):
         '''
         x = Variable(torch.FloatTensor([1.1, 2.3]), requires_grad=True)
         outputs = Variable(torch.IntTensor([1, 2]), requires_grad=True)
-        self.checkScript(script, 'to_int', [x], [outputs], False)
+        self.checkScript(script, 'to_int', [x], [outputs], True)
 
     def test_python_frontend(self):
         def fn(x, y, z):
@@ -1416,7 +1418,7 @@ class TestJit(TestCase):
         '''
         inputs = self._make_scalar_vars([1, 1, 10], np.int32)
         outputs = self._make_scalar_vars([20], np.int32)
-        self.checkScript(script, inputs, outputs, False, 'test_while')
+        self.checkScript(script, inputs, outputs, True, 'test_while')
 
     def test_script_fibb(self):
         script = '''
@@ -1443,7 +1445,7 @@ class TestJit(TestCase):
         '''
         inputs = self._make_scalar_vars([10], np.int32)
         outputs = self._make_scalar_vars([2, 4, 3], np.int32)
-        self.checkScript(script, inputs, outputs, False, 'test_while')
+        self.checkScript(script, inputs, outputs, True, 'test_while')
 
     def test_script_if(self):
         script = '''
@@ -1458,7 +1460,7 @@ class TestJit(TestCase):
         '''
         inputs = self._make_scalar_vars([1, -1], np.int32)
         outputs = self._make_scalar_vars([7], np.int32)
-        self.checkScript(script, inputs, outputs, False, 'test_if')
+        self.checkScript(script, inputs, outputs, True, 'test_if')
 
     def test_script_if_noelse(self):
         script = '''
@@ -1469,7 +1471,7 @@ class TestJit(TestCase):
         '''
         inputs = self._make_scalar_vars([-1, 1], np.int32)
         outputs = self._make_scalar_vars([0], np.int32)
-        self.checkScript(script, inputs, outputs, False, 'test_if_noelse')
+        self.checkScript(script, inputs, outputs, True, 'test_if_noelse')
 
     def test_script_while_nonexistant_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
@@ -1501,7 +1503,7 @@ class TestJit(TestCase):
         '''
         inputs = self._make_scalar_vars([42, 1337], np.int32)
         outputs = self._make_scalar_vars([1379], np.int32)
-        self.checkScript(script, inputs, outputs, False, 'test_while')
+        self.checkScript(script, inputs, outputs, True, 'test_while')
 
     def test_script_while_nest_if(self):
         script = '''
@@ -1531,7 +1533,7 @@ class TestJit(TestCase):
         '''
         inputs = self._make_scalar_vars([4321, 1234], np.int32)
         outputs = self._make_scalar_vars([-4321], np.int32)
-        self.checkScript(script, inputs, outputs, False, 'test_if_while')
+        self.checkScript(script, inputs, outputs, True, 'test_if_while')
 
     def test_script_ternary(self):
         cu = torch.jit._jit_script_compile('''
