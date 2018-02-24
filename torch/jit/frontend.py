@@ -294,15 +294,15 @@ class ExprBuilder(Builder):
     @staticmethod
     def build_Call(ctx, expr):
         ref = build_expr(ctx, expr.func, allow_methods=True)
-        if type(ref) is not ExprBuilder._MethodRef:
-            ref_range = ref.range()
-            parenthesis_range = find_after(ctx, ref_range.end, '(')
-            raise FrontendTypeError(
-                ctx.make_raw_range(ref_range.start, parenthesis_range.end),
-                "trying to call a non-function object")
-        args = [build_expr(ctx, py_arg) for py_arg in expr.args]
-        kwargs = [Attribute(Ident(name), build_expr(ctx, value)) for name, value in expr.keywords]
-        return Apply(ref.name, [ref.self] + args, kwargs)
+        if type(ref) is ExprBuilder._MethodRef:
+            args = [build_expr(ctx, py_arg) for py_arg in expr.args]
+            kwargs = [Attribute(Ident(name), build_expr(ctx, value)) for name, value in expr.keywords]
+            return Apply(ref.name, [ref.self] + args, kwargs)
+        else:
+            # TODO: actually check if the function is callable in this scope
+            args = [build_expr(ctx, py_arg) for py_arg in expr.args]
+            kwargs = [Attribute(Ident(name), build_expr(ctx, value)) for name, value in expr.keywords]
+            return Apply(ref.name(), args, kwargs)
 
     @staticmethod
     def build_Name(ctx, expr):
