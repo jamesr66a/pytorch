@@ -1302,8 +1302,11 @@ class TestJit(TestCase):
         g2result2 = torch.autograd.grad(l3, [da2, db2])
         self.assertEqual(g2result, g2result2)
 
-    def checkScript(self, script, inputs, outputs, optimize, name='func'):
-        cu = torch.jit._jit_script_compile(script)
+    def compileScript(self, script, callback=None):
+        return torch.jit._jit_script_compile(script, callback)
+
+    def checkScript(self, script, inputs, outputs, optimize, name='func', callback=None):
+        cu = self.compileScript(script, callback)
         graph = cu.get_graph(name)
         ge = torch._C.GraphExecutor(graph, optimize)
         outputs_ge = ge(*inputs)
@@ -1473,7 +1476,7 @@ class TestJit(TestCase):
 
     def test_script_while_nonexistant_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
-            torch.jit._jit_script_compile('''
+            self.compileScript('''
             def test_while(a, b) -> (c):
                 while a < 10:
                     a = a + x
@@ -1483,7 +1486,7 @@ class TestJit(TestCase):
 
     def test_script_while_nonexistant_cond_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
-            torch.jit._jit_script_compile('''
+            self.compileScript('''
             def test_while(a, b) -> (c):
                 while a < x:
                     a = a + 1
@@ -1534,7 +1537,7 @@ class TestJit(TestCase):
         self.checkScript(script, inputs, outputs, False, 'test_if_while')
 
     def test_script_ternary(self):
-        cu = torch.jit._jit_script_compile('''
+        cu = self.compileScript('''
         def test_ternary_control(a, b) -> (c):
             c = 3
             if a > 3:
@@ -1542,7 +1545,7 @@ class TestJit(TestCase):
             else:
                 c = b
         ''')
-        cu2 = torch.jit._jit_script_compile('''
+        cu2 = self.compileScript('''
         def test_ternary(a, b) -> (c):
             c = 3
             c = a + b if a > 3 else b
@@ -1551,6 +1554,41 @@ class TestJit(TestCase):
             str(cu.get_graph('test_ternary_control')),
             str(cu2.get_graph('test_ternary')),
         )
+
+    def test_script_call_python_func(self):
+        def pyfunc(a):
+                return a * 3.0
+
+        script = '''
+        def other_func(a) -> (b):
+            b = a + a
+
+        def test_call_python(a) -> (b):
+            b = pyfunc(a)
+            b = other_func(b)
+            i = 0
+            step = 1
+            while i < 10:
+                b = pyfunc(b)
+                if b > 3.0:
+                    b = pyfunc(b)
+                i = 11
+        '''
+        inputs = self._make_scalar_vars([1], np.float32)
+        outputs = self._make_scalar_vars([54], np.float32)
+
+        callables = {'pyfunc': pyfunc}
+
+        def resolution_callback(graph, symbol):
+            if symbol in callables:
+                return callables[symbol]
+
+            raise RuntimeError('Symbol not found: {}'.format(symbol))
+
+        self.checkScript(
+            script, inputs, outputs, False, name='test_call_python',
+            callback=resolution_callback)
+
 
 if __name__ == '__main__':
     run_tests()

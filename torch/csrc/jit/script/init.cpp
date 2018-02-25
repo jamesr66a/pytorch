@@ -12,7 +12,10 @@ void initJitScriptBindings(PyObject* module) {
           "get_graph",
           &CompilationUnit::getGraph,
           py::return_value_policy::reference);
-  m.def("_jit_script_compile", jitScriptCompile);
+  m.def(
+      "_jit_script_compile",
+      jitScriptCompile,
+      py::return_value_policy::reference);
 }
 
 } // namespace script
