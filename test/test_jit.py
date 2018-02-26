@@ -1347,7 +1347,7 @@ class TestJit(TestCase):
         '''
         x = Variable(torch.rand(10).float(), requires_grad=True)
         outputs = x[:5]
-        self.checkScript(script, [x], [outputs], True)
+        self.checkScript(script, [x], outputs, True)
 
     def test_script_gather(self):
         script = '''
@@ -1376,7 +1376,7 @@ class TestJit(TestCase):
         outputs = alpha * x + beta * y
         # note - cannot optimize yet because broadcasts are not inserted
         # before the fuser runs
-        self.checkScript(script, [alpha, beta, x, y], [outputs], False)
+        self.checkScript(script, [alpha, beta, x, y], outputs, False)
 
     @unittest.skip("RuntimeError: VariableType::ID() not implemented")
     def test_script_cast(self):
