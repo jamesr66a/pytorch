@@ -462,7 +462,10 @@ def createResolutionCallback():
     frame = inspect.stack()[2][0]
     def env(graph, key):
         if key not in frame.f_locals:
-            return frame.f_globals[key]
+            try:
+                return frame.f_globals[key]
+            except:
+                raise RuntimeError("Unknown function {}".format(key))
         else:
             return frame.f_locals[key]
 
@@ -492,7 +495,7 @@ class CompilationUnit(object):
 def script(fn, rcb=None):
     if not rcb:
         rcb = createResolutionCallback()
-    ast = torch.jit.frontend.get_jit_ast(fn)
+    ast = torch.jit.frontend.get_jit_ast(fn, rcb)
     graph = _jit_script_compile(ast, rcb)
     return torch._C.GraphExecutor(graph, True)
 

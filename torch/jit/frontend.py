@@ -108,12 +108,12 @@ class FrontendTypeError(FrontendError):
     pass
 
 
-def get_jit_ast(fn):
+def get_jit_ast(fn, rcb):
     source = dedent(inspect.getsource(fn))
     py_ast = ast.parse(source)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
-    return build_def(SourceRangeFactory(source), py_ast.body[0])
+    return build_def(SourceRangeFactory(source, rcb), py_ast.body[0])
 
 
 class Builder(object):
@@ -299,10 +299,13 @@ class ExprBuilder(Builder):
             kwargs = [Attribute(Ident(name), build_expr(ctx, value)) for name, value in expr.keywords]
             return Apply(ref.name, [ref.self] + args, kwargs)
         else:
-            # TODO: actually check if the function is callable in this scope
-            args = [build_expr(ctx, py_arg) for py_arg in expr.args]
-            kwargs = [Attribute(Ident(name), build_expr(ctx, value)) for name, value in expr.keywords]
-            return Apply(ref.name(), args, kwargs)
+            try:
+                ctx.rcb(None, ref.name().name)
+                args = [build_expr(ctx, py_arg) for py_arg in expr.args]
+                kwargs = [Attribute(Ident(name), build_expr(ctx, value)) for name, value in expr.keywords]
+                return Apply(ref.name(), args, kwargs)
+            except:
+                raise RuntimeError("Unknown function {}".format(ref.name().name))
 
     @staticmethod
     def build_Name(ctx, expr):
