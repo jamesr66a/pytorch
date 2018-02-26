@@ -1,4 +1,5 @@
 #include <Python.h>
+#include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/argument_spec.h"
@@ -167,16 +168,13 @@ void PropagateShapeOnNode(Node * node) {
         node->outputs()[i]->setType(loop_carried_block[i]->type());
       }
     } break;
-    case kPythonOp: {
-      // TODO: propagate shapes through PythonOp
-    } break;
     default: {
-      auto op_info = getTensorOp(node);
+      auto operation = getOperation(node, true);
       std::vector<at::Tensor> stack;
       for(auto & type : types) {
         stack.push_back(representativeTensor(type));
       }
-      op_info.op(stack);
+      operation(stack);
       for(size_t i = 0; i < stack.size(); ++i) {
         node->outputs()[i]->inferTypeFrom(stack[i]);
       }
