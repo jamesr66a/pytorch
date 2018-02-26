@@ -108,12 +108,12 @@ class FrontendTypeError(FrontendError):
     pass
 
 
-def get_jit_ast(fn):
+def get_jit_ast(fn, rcb):
     source = dedent(inspect.getsource(fn))
     py_ast = ast.parse(source)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
-    return build_def(SourceRangeFactory(source), py_ast.body[0])
+    return build_def(SourceRangeFactory(source, rcb), py_ast.body[0])
 
 
 class Builder(object):
@@ -294,15 +294,18 @@ class ExprBuilder(Builder):
     @staticmethod
     def build_Call(ctx, expr):
         ref = build_expr(ctx, expr.func, allow_methods=True)
-        if type(ref) is not ExprBuilder._MethodRef:
-            ref_range = ref.range()
-            parenthesis_range = find_after(ctx, ref_range.end, '(')
-            raise FrontendTypeError(
-                ctx.make_raw_range(ref_range.start, parenthesis_range.end),
-                "trying to call a non-function object")
-        args = [build_expr(ctx, py_arg) for py_arg in expr.args]
-        kwargs = [Attribute(Ident(name), build_expr(ctx, value)) for name, value in expr.keywords]
-        return Apply(ref.name, [ref.self] + args, kwargs)
+        if type(ref) is ExprBuilder._MethodRef:
+            args = [build_expr(ctx, py_arg) for py_arg in expr.args]
+            kwargs = [Attribute(Ident(name), build_expr(ctx, value)) for name, value in expr.keywords]
+            return Apply(ref.name, [ref.self] + args, kwargs)
+        else:
+            try:
+                ctx.rcb(None, ref.name().name)
+                args = [build_expr(ctx, py_arg) for py_arg in expr.args]
+                kwargs = [Attribute(Ident(name), build_expr(ctx, value)) for name, value in expr.keywords]
+                return Apply(ref.name(), args, kwargs)
+            except:
+                raise RuntimeError("Unknown function {}".format(ref.name().name))
 
     @staticmethod
     def build_Name(ctx, expr):
