@@ -1863,5 +1863,75 @@ class TestJit(TestCase):
 
         self.assertExpected(captured[0])
 
+    def test_beam_search(self):
+        def decoder():
+            return torch.nn.functional.log_softmax(
+                torch.randn(6, 1, 100), dim=-1)
+
+        cu = torch.jit.CompilationUnit('''
+        def test_beam_search(
+            scores_t, hypo_t, tokens_t, attention_t
+        ) -> (
+            output_token_beam_list, output_prev_index_beam_list,
+            output_score_beam_list, output_attention_weights_beam_list
+        ):
+            output_token_beam_list = tokens_t
+            output_prev_index_beam_list = hypo_t
+            output_score_beam_list = scores_t
+            output_attention_weights_beam_list = attention_t
+
+            timestep = 0LL
+
+            while timestep < 20LL:
+                log_probs = decoder()
+
+                best_scores_per_hypo, best_tokens_per_hypo = topk(
+                    log_probs, k=6, dim=-1, largest=True, sorted=True)
+
+                output_scores = best_scores_per_hypo + squeeze(scores_t, dim=0)
+
+                output_scores_flattened = view(output_scores, size=[-1])
+                output_scores_flattened_slice = output_scores_flattened
+                if timestep == 0:
+                    output_scores_flattened_slice = slice(
+                        output_scores_flattened, dim=0, end=6, start=0, step=1)
+                else:
+                    output_scores_flattened_slice = slice(
+                        output_scores_flattened, dim=0, end=-1, start=0, step=1)
+                output_scores_flattened_slice = view(
+                    output_scores_flattened_slice, size=[1, -1])
+
+                scores_t, best_indices = topk(
+                    output_scores_flattened_slice, k=6, dim=-1,
+                    largest=True, sorted=True)
+
+                hypo_t_int64 = best_indices / 6LL
+
+                attention_t = index_select(
+                    attention_t, squeeze(hypo_t_int64, dim=0), dim=0)
+                tokens_t_int64 = view(best_tokens_per_hypo, size=[-1])
+                tokens_t_int64 = index_select(
+                    tokens_t_int64, squeeze(best_indices, dim=0), dim=0)
+                tokens_t_int64 = view(tokens_t_int64, size=[1, -1])
+
+                output_token_beam_list = cat(
+                    output_token_beam_list, tokens_t_int64, dim=0)
+                output_prev_index_beam_list = cat(
+                    output_prev_index_beam_list, hypo_t_int64, dim=0)
+                output_score_beam_list = cat(
+                    output_score_beam_list, scores_t, dim=0)
+                output_attention_weights_beam_list = cat(
+                    output_attention_weights_beam_list, attention_t, dim=0)
+
+                timestep += 1
+        ''')
+
+        scores_t = torch.zeros(1, 6)
+        hypo_t = torch.zeros(1, 6).type(torch.LongTensor)
+        tokens_t = (torch.ones(1, 6) * 1).type(torch.LongTensor)
+        attention_t = torch.nn.functional.softmax(torch.randn(6, 20), dim=-1)
+
+        print(cu.test_beam_search(scores_t, hypo_t, tokens_t, attention_t))
+
 if __name__ == '__main__':
     run_tests()
