@@ -1614,10 +1614,13 @@ class TestJit(TestCase):
 
         x = Variable(torch.arange(4), requires_grad=True)
         y = Variable(torch.arange(4) * 2, requires_grad=True)
-        with capture_stdout():
-            expected_out = func(x, y)
+
         expected_out = (x + y).sigmoid().pow(2)
-        self.checkScript(func, [x, y], expected_out, False)
+
+        with capture_stdout() as captured:
+            self.checkScript(func, [x, y], expected_out, False)
+
+        self.assertExpected(captured[0])
 
     def test_trace_annotation(self):
         @torch.jit.trace(Variable(torch.rand(1)))
@@ -1797,7 +1800,7 @@ class TestJit(TestCase):
         self.assertNotEqual(out, out_ones)
 
     def test_shape_prop_mismatch_output(self):
-        with self.assertRaisesRegex(RuntimeError, "Number of op outputs did not match number of node outputs"):
+        with self.assertRaises(RuntimeError):
             cu = torch.jit.CompilationUnit('''
             def test_shape_prop_mismatch_output(a) -> (b):
                 b = slice(a, dim=0, end=-2, start=2, step=1)
@@ -1838,7 +1841,6 @@ class TestJit(TestCase):
                 this = cat(this, meme, dim=0)
                 that = cat(that, meme, dim=0)
                 theother = cat(theother, meme, dim=0)
-                print(i)
                 i = i + 1
         ''')
 
@@ -1856,7 +1858,10 @@ class TestJit(TestCase):
 
         inputs = [torch.ones(5, 5)]
 
-        cu.test_print_graph_executor(*inputs)
+        with capture_stdout() as captured:
+            cu.test_print_graph_executor(*inputs)
+
+        self.assertExpected(captured[0])
 
 
 if __name__ == '__main__':
