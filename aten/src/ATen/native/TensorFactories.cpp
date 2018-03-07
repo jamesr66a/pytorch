@@ -12,6 +12,23 @@ Tensor empty_like(const Tensor& self, const Type& dtype) {
   return dtype.tensor(self.sizes());
 }
 
+Tensor toType(const Tensor& self, const Type& dtype, bool non_blocking) {
+  if (self.type() == dtype)
+    return self;
+  std::cout << dtype.toString() << std::endl;
+  self.print();
+  return dtype.copy(self, non_blocking);
+}
+
+Tensor toType(const Tensor& self, ScalarType stype) {
+  return self;
+  // return self.toType(self.type().toScalarType(ScalarType(stype)));
+}
+
+Tensor toBackend(const Tensor& self, Backend b) {
+  return self.toType(self.type().toBackend(b));
+}
+
 Tensor ones_like(const Tensor& self) {
   return self.type().ones(self.sizes());
 }

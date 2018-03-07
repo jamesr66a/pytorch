@@ -180,6 +180,15 @@
 - func: empty_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
+- func: toType(Tensor self, Type dtype, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: toType(Tensor self, ScalarType stype) -> Tensor
+  variants: function, method
+
+- func: toBackend(Tensor self, Backend b) -> Tensor
+  variants: function, method
+
 - func: embedding_bag(Tensor weight, IndexTensor indices, IndexTensor offsets, bool scale_grad_by_freq=false, int64_t mode=0, bool sparse=false) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:

@@ -18,7 +18,7 @@ _(int64_t,Long,i) \
 _(int16_t,Short,i) \
 _(Half,Half,d)
 
-enum class ScalarType {
+enum class ScalarType : int64_t {
 #define DEFINE_ENUM(_1,n,_2) \
   n,
   AT_FORALL_SCALAR_TYPES(DEFINE_ENUM)
@@ -26,8 +26,7 @@ enum class ScalarType {
   Undefined,
   NumOptions
 };
-
-enum class Backend {
+enum class Backend : int64_t {
   CPU,
   CUDA,
   SparseCPU,

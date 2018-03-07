@@ -145,6 +145,7 @@ def gen_variable_type(out, aten_declarations):
     type_declarations = []
     type_definitions = []
 
+    print(aten_declarations)
     for declaration in aten_declarations:
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         if declaration['name'] not in MANUAL_IMPLEMENTATIONS:

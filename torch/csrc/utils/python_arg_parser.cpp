@@ -24,6 +24,8 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"Storage", ParameterType::STORAGE},
   {"PyObject*", ParameterType::PYOBJECT},
   {"Type", ParameterType::TYPE},
+  {"ScalarType", ParameterType::SCALARTYPE},
+  {"Backend", ParameterType::BACKEND}
 };
 
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
@@ -109,6 +111,8 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::STORAGE: return isStorage(obj);
     case ParameterType::PYOBJECT: return true;
     case ParameterType::TYPE: return THPDtype_Check(obj);
+    case ParameterType::SCALARTYPE: return PyInt_Check(obj);
+    case ParameterType::BACKEND: return PyInt_Check(obj);
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -126,6 +130,8 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::STORAGE: return "torch.Storage";
     case ParameterType::PYOBJECT: return "object";
     case ParameterType::TYPE: return "torch.dtype";
+    case ParameterType::SCALARTYPE: return "ScalarType";
+    case ParameterType::BACKEND: return "Backend";
     default: throw std::runtime_error("unknown parameter type");
   }
 }

@@ -88,6 +88,8 @@ struct Variable : public at::Tensor {
   /// Default constructor.
   Variable() = default;
 
+  virtual void dank() const;
+
   // Factory Functions
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -306,7 +308,7 @@ struct Variable : public at::Tensor {
 //                            Variable::Impl
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-struct Variable::Impl : public at::TensorImpl {
+struct Variable::Impl : public at::TensorImpl  {
   explicit Impl(
       at::Tensor data_,
       bool requires_grad_ = false,
@@ -359,6 +361,10 @@ struct Variable::Impl : public at::TensorImpl {
 
   // For use in torch::jit::tracer
   auto_unique_ptr<jit::tracer::ValueTracingState> tracing_state;
+
+  void dank() const {
+    std::cout << tracing_state.get() << std::endl;
+  }
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -412,6 +418,7 @@ inline Variable make_variable_view(
 inline Variable make_variable(at::Tensor data, bool requires_grad = false) {
   if (data.defined()) {
     auto impl = new Variable::Impl(data, requires_grad);
+    std::cout << "tracing state " << impl->tracing_state.get() << std::endl;
     return Variable(impl, /*retain=*/false);
   }
   return Variable();

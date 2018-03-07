@@ -10,23 +10,23 @@ inline Tensor & Tensor::operator=(Tensor const & rhs) && {
   return copy_(rhs);
 }
 
-inline Tensor Tensor::toType(const Type & t, bool non_blocking) const {
-  if(type() == t)
-    return *this;
-  return t.copy(*this, non_blocking);
-}
-
+// inline Tensor Tensor::toType(const Type & t, bool non_blocking) const {
+//   if(type() == t)
+//     return *this;
+//   return t.copy(*this, non_blocking);
+// }
+//
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
   return type().copy_(*this, src, non_blocking);
 }
 
-inline Tensor Tensor::toType(ScalarType t) const {
-  return toType(type().toScalarType(t));
-}
-
-inline Tensor Tensor::toBackend(Backend b) const {
-  return toType(type().toBackend(b));
-}
+// inline Tensor Tensor::toType(ScalarType t) const {
+//   return toType(type().toScalarType(t));
+// }
+// 
+// inline Tensor Tensor::toBackend(Backend b) const {
+//   return toType(type().toBackend(b));
+// }
 
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch

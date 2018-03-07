@@ -25,6 +25,7 @@
 #include <sstream>
 #include <vector>
 #include <ATen/ATen.h>
+#include <ATen/ScalarType.h>
 
 #include "torch/csrc/THP.h"
 #include "torch/csrc/utils/object_ptr.h"
@@ -40,7 +41,7 @@ namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT, TYPE
+  BOOL, STORAGE, PYOBJECT, TYPE, SCALARTYPE, BACKEND
 };
 
 struct FunctionParameter;
@@ -99,6 +100,8 @@ struct PythonArgs {
   inline bool toBool(int i);
   inline bool toBoolWithDefault(int i, bool default_bool);
   inline bool isNone(int i);
+  inline at::ScalarType toScalarType(int i);
+  inline at::Backend toBackend(int i);
 };
 
 struct FunctionSignature {
@@ -270,6 +273,14 @@ inline const at::Type& PythonArgs::typeWithDefault(int i, const at::Type& defaul
 
 inline int64_t PythonArgs::toInt64(int i) {
   return toInt64WithDefault(i, signature.params[i].default_int);
+}
+
+inline at::ScalarType PythonArgs::toScalarType(int i) {
+  return static_cast<at::ScalarType>(i);
+}
+
+inline at::Backend PythonArgs::toBackend(int i) {
+  return static_cast<at::Backend>(i);
 }
 
 inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {

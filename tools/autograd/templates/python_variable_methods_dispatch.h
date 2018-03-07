@@ -19,6 +19,12 @@ using at::Generator;
 using at::SparseTensor;
 using at::Storage;
 
+static void maybe_initialize_cuda(const at::Type &type) {
+  if (type.is_cuda()) {
+    torch::utils::cuda_lazy_init();
+  }
+}
+
 ${py_method_dispatch}
 
 }} // namespace torch::autograd

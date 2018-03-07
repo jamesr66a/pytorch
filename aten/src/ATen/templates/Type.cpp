@@ -35,6 +35,8 @@ Tensor Type::copy(const Tensor & src, bool non_blocking) const {
     return sparse_coo_tensor(indices_copy, values_copy, src.sizes());
   } else {
     Tensor r = this->tensor(src.sizes());
+    src.print();
+    r.print();
     r.copy_(src, non_blocking);
     return r;
   }

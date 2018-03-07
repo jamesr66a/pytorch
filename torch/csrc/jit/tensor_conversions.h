@@ -54,6 +54,20 @@ struct tensor_as_impl<at::Scalar> {
   }
 };
 
+template<>
+struct tensor_as_impl<at::ScalarType> {
+  at::ScalarType operator()(at::Tensor&& t) {
+    return static_cast<at::ScalarType>(*t.data<int64_t>());
+  }
+};
+
+template<>
+struct tensor_as_impl<at::Backend> {
+  at::Backend operator()(at::Tensor&& t) {
+    return static_cast<at::Backend>(*t.data<int64_t>());
+  }
+};
+
 }
 
 template<typename T>

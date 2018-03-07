@@ -172,4 +172,10 @@ void Variable::set_tracing_state(
 jit::tracer::ValueTracingState& Variable::tracing_state() const noexcept {
   return *get()->tracing_state;
 }
+
+void Variable::dank() const {
+  get()->dank();
+}
+
+
 }} // namespace torch::autograd

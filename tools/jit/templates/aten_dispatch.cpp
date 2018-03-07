@@ -19,6 +19,8 @@ using at::Scalar;
 using at::Tensor;
 using at::IntList;
 using at::TensorList;
+using at::ScalarType;
+using at::Backend;
 
 namespace {
 

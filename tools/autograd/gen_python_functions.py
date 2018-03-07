@@ -215,6 +215,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'int64_t': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
+        'ScalarType': 'toScalarType',
+        'Backend': 'toBackend',
     }
 
     unpack_with_default_methods = {

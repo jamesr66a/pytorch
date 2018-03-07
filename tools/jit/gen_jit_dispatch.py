@@ -19,6 +19,8 @@ ATTR_METHOD_MAP = {
     'std::array<bool,2>': 'is',
     'std::array<bool,3>': 'is',
     'std::array<bool,4>': 'is',
+    'ScalarType': 'i',
+    'Backend': 'i',
 }
 
 TYPE_CASTS = {
@@ -27,6 +29,8 @@ TYPE_CASTS = {
     'std::array<bool,4>': 'as_bool_array<4>',
     'Scalar': 'Scalar',
     'IntList': 'std::vector<int64_t>',
+    'ScalarType': 'static_cast<at::ScalarType>',
+    'Backend': 'static_cast<at::Backend>',
 }
 
 KW_ASSIGNMENT = CodeTemplate("""\
@@ -131,6 +135,7 @@ def gen_jit_dispatch(declarations, out):
                 pos_assignments.append(assign)
                 arguments.append(arg['name'])
             else:
+                print(arg['simple_type'])
                 assign = KW_ASSIGNMENT.substitute(type_cast=TYPE_CASTS.get(arg['simple_type'], arg['simple_type']),
                                                   name=arg['name'],
                                                   method=ATTR_METHOD_MAP[arg['simple_type']])
