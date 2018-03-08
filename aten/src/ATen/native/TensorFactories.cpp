@@ -1,8 +1,18 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/ScalarType.h"
 
 namespace at {
 namespace native {
+
+#define DEFINE_CAST_OP(_1, n, _2)                                            \
+  Tensor cast_##_1(const Tensor& self, bool non_blocking) {                  \
+    return self.type().toScalarType(ScalarType::n).copy(self, non_blocking); \
+  }
+
+AT_FORALL_SCALAR_TYPES(DEFINE_CAST_OP)
+
+#undef DEFINE_CAST_OP
 
 Tensor empty_like(const Tensor& self) {
   return self.type().tensor(self.sizes());
