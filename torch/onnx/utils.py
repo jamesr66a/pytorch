@@ -18,6 +18,7 @@ import types
 from torch._six import string_classes
 from torch.autograd import Function, function
 from torch.jit import _unique_state_dict
+from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME
 
 
 @contextlib.contextmanager
@@ -114,7 +115,7 @@ def _trace(func, args, return_outs=False, aten=False):
 
 
 def _export(model, args, f, export_params=True, verbose=False, training=False,
-            input_names=None, output_names=None, aten=False):
+            input_names=None, output_names=None, aten=False, export_zip=False, compress_zip=False):
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.autograd.Variable):
         args = (args, )
@@ -147,11 +148,20 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     if export_params:
         # NB: OrderedDict values is not actually a list, but trace.export is
         # not duck-typed and expects an actual list.
-        proto = trace.export(list(_unique_state_dict(model).values()), _onnx_opset_version)
+        proto, export_map = trace.export(list(_unique_state_dict(model).values()), _onnx_opset_version, export_zip)
     else:
-        proto = trace.export([], _onnx_opset_version)
+        proto, export_map = trace.export([], _onnx_opset_version)
 
-    torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
+    if export_zip:
+        import zipfile
+        compression = zipfile.ZIP_DEFLATED if compress_zip else zipfile.ZIP_STORED
+        with zipfile.ZipFile(f, 'w', compression=compression) as z:
+            z.writestr(ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
+            for k, v in export_map.items():
+                z.writestr(k, v)
+    else:
+        torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
+
     return torch_out
 
 

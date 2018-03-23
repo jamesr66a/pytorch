@@ -75,7 +75,7 @@ const pb_field_t onnx_GraphProto_fields[8] = {
     PB_LAST_FIELD
 };
 
-const pb_field_t onnx_TensorProto_fields[13] = {
+const pb_field_t onnx_TensorProto_fields[14] = {
     PB_FIELD(  1, INT64   , REPEATED, CALLBACK, FIRST, onnx_TensorProto, dims, dims, 0),
     PB_FIELD(  2, UENUM   , OPTIONAL, STATIC  , OTHER, onnx_TensorProto, data_type, dims, 0),
     PB_FIELD(  3, MESSAGE , OPTIONAL, STATIC  , OTHER, onnx_TensorProto, segment, data_type, &onnx_TensorProto_Segment_fields),
@@ -88,6 +88,7 @@ const pb_field_t onnx_TensorProto_fields[13] = {
     PB_FIELD( 10, DOUBLE  , REPEATED, CALLBACK, OTHER, onnx_TensorProto, double_data, raw_data, 0),
     PB_FIELD( 11, UINT64  , REPEATED, CALLBACK, OTHER, onnx_TensorProto, uint64_data, double_data, 0),
     PB_FIELD( 12, STRING  , OPTIONAL, CALLBACK, OTHER, onnx_TensorProto, doc_string, uint64_data, 0),
+    PB_FIELD( 13, STRING  , OPTIONAL, CALLBACK, OTHER, onnx_TensorProto, external_data_ref, doc_string, 0),
     PB_LAST_FIELD
 };
 
