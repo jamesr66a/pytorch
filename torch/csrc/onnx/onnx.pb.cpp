@@ -75,21 +75,138 @@ const pb_field_t onnx_GraphProto_fields[8] = {
     PB_LAST_FIELD
 };
 
-const pb_field_t onnx_TensorProto_fields[13] = {
-    PB_FIELD(  1, INT64   , REPEATED, CALLBACK, FIRST, onnx_TensorProto, dims, dims, 0),
-    PB_FIELD(  2, UENUM   , OPTIONAL, STATIC  , OTHER, onnx_TensorProto, data_type, dims, 0),
-    PB_FIELD(  3, MESSAGE , OPTIONAL, STATIC  , OTHER, onnx_TensorProto, segment, data_type, &onnx_TensorProto_Segment_fields),
-    PB_FIELD(  4, FLOAT   , REPEATED, CALLBACK, OTHER, onnx_TensorProto, float_data, segment, 0),
-    PB_FIELD(  5, INT32   , REPEATED, CALLBACK, OTHER, onnx_TensorProto, int32_data, float_data, 0),
-    PB_FIELD(  6, BYTES   , REPEATED, CALLBACK, OTHER, onnx_TensorProto, string_data, int32_data, 0),
-    PB_FIELD(  7, INT64   , REPEATED, CALLBACK, OTHER, onnx_TensorProto, int64_data, string_data, 0),
-    PB_FIELD(  8, STRING  , OPTIONAL, CALLBACK, OTHER, onnx_TensorProto, name, int64_data, 0),
-    PB_FIELD(  9, BYTES   , OPTIONAL, CALLBACK, OTHER, onnx_TensorProto, raw_data, name, 0),
-    PB_FIELD( 10, DOUBLE  , REPEATED, CALLBACK, OTHER, onnx_TensorProto, double_data, raw_data, 0),
-    PB_FIELD( 11, UINT64  , REPEATED, CALLBACK, OTHER, onnx_TensorProto, uint64_data, double_data, 0),
-    PB_FIELD( 12, STRING  , OPTIONAL, CALLBACK, OTHER, onnx_TensorProto, doc_string, uint64_data, 0),
-    PB_LAST_FIELD
-};
+const pb_field_t onnx_TensorProto_fields[14] = {
+    PB_FIELD(
+        1,
+        INT64,
+        REPEATED,
+        CALLBACK,
+        FIRST,
+        onnx_TensorProto,
+        dims,
+        dims,
+        0),
+    PB_FIELD(
+        2,
+        UENUM,
+        OPTIONAL,
+        STATIC,
+        OTHER,
+        onnx_TensorProto,
+        data_type,
+        dims,
+        0),
+    PB_FIELD(
+        3,
+        MESSAGE,
+        OPTIONAL,
+        STATIC,
+        OTHER,
+        onnx_TensorProto,
+        segment,
+        data_type,
+        &onnx_TensorProto_Segment_fields),
+    PB_FIELD(
+        4,
+        FLOAT,
+        REPEATED,
+        CALLBACK,
+        OTHER,
+        onnx_TensorProto,
+        float_data,
+        segment,
+        0),
+    PB_FIELD(
+        5,
+        INT32,
+        REPEATED,
+        CALLBACK,
+        OTHER,
+        onnx_TensorProto,
+        int32_data,
+        float_data,
+        0),
+    PB_FIELD(
+        6,
+        BYTES,
+        REPEATED,
+        CALLBACK,
+        OTHER,
+        onnx_TensorProto,
+        string_data,
+        int32_data,
+        0),
+    PB_FIELD(
+        7,
+        INT64,
+        REPEATED,
+        CALLBACK,
+        OTHER,
+        onnx_TensorProto,
+        int64_data,
+        string_data,
+        0),
+    PB_FIELD(
+        8,
+        STRING,
+        OPTIONAL,
+        CALLBACK,
+        OTHER,
+        onnx_TensorProto,
+        name,
+        int64_data,
+        0),
+    PB_FIELD(
+        9,
+        BYTES,
+        OPTIONAL,
+        CALLBACK,
+        OTHER,
+        onnx_TensorProto,
+        raw_data,
+        name,
+        0),
+    PB_FIELD(
+        10,
+        DOUBLE,
+        REPEATED,
+        CALLBACK,
+        OTHER,
+        onnx_TensorProto,
+        double_data,
+        raw_data,
+        0),
+    PB_FIELD(
+        11,
+        UINT64,
+        REPEATED,
+        CALLBACK,
+        OTHER,
+        onnx_TensorProto,
+        uint64_data,
+        double_data,
+        0),
+    PB_FIELD(
+        12,
+        STRING,
+        OPTIONAL,
+        CALLBACK,
+        OTHER,
+        onnx_TensorProto,
+        doc_string,
+        uint64_data,
+        0),
+    PB_FIELD(
+        13,
+        STRING,
+        OPTIONAL,
+        CALLBACK,
+        OTHER,
+        onnx_TensorProto,
+        external_data_ref,
+        doc_string,
+        0),
+    PB_LAST_FIELD};
 
 const pb_field_t onnx_TensorProto_Segment_fields[3] = {
     PB_FIELD(  1, INT64   , OPTIONAL, STATIC  , FIRST, onnx_TensorProto_Segment, begin, begin, 0),
@@ -133,7 +250,7 @@ const pb_field_t onnx_OperatorSetIdProto_fields[3] = {
 #if !defined(PB_FIELD_32BIT)
 /* If you get an error here, it means that you need to define PB_FIELD_32BIT
  * compile-time option. You can do that in pb.h or on compiler command line.
- * 
+ *
  * The reason you need to do this is that some of your messages contain tag
  * numbers or field sizes that are larger than what can fit in 8 or 16 bit
  * field descriptors.
@@ -144,7 +261,7 @@ PB_STATIC_ASSERT((pb_membersize(onnx_TensorProto, segment) < 65536), YOU_MUST_DE
 #if !defined(PB_FIELD_16BIT) && !defined(PB_FIELD_32BIT)
 /* If you get an error here, it means that you need to define PB_FIELD_16BIT
  * compile-time option. You can do that in pb.h or on compiler command line.
- * 
+ *
  * The reason you need to do this is that some of your messages contain tag
  * numbers or field sizes that are larger than what can fit in the default
  * 8 bit descriptors.

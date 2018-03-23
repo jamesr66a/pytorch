@@ -19,40 +19,61 @@ namespace torch { namespace jit {
 
 void initPythonTracerBindings(PyObject* module_) {
   auto m = py::handle(module_).cast<py::module>();
-  py::class_<TracingState,std::shared_ptr<TracingState>>(m, "TracingState", py::dynamic_attr())
-    // NB: no constructor; you have to get it from C++ code
-    .def("__repr__", [](const TracingState& s) {
-      std::ostringstream ss;
-      ss << "<TracingState " << (const void*)&s << ">";
-      return ss.str();
-    })
-    .def("__str__", [](const TracingState& s) -> std::string {
-      if (s.is_expired()) return "<expired TracingState>";
-      std::ostringstream ss;
-      ss << *s.graph;
-      return ss.str();
-    })
-    .def("push_scope", [](TracingState& s, const std::string& scope_name) {
-      ASSERT_UNEXPIRED("push_scope");
-      s.push_scope(scope_name);
-    })
-    .def("pop_scope", [](TracingState& s) {
-      ASSERT_UNEXPIRED("pop_scope");
-      s.pop_scope();
-    })
-    .def("export", [](TracingState& s, const std::vector<at::Tensor>& initializers, int64_t onnx_opset_version) {
-      ASSERT_UNEXPIRED("export");
-      return py::bytes(ExportGraph(s.graph, initializers, onnx_opset_version));
-    })
-    .def("graph", [](TracingState& s) {
-      return s.graph;
-    })
-    .def_property_readonly("is_expired", [](TracingState& s) {
-      return s.is_expired();
-    })
-    .def_property_readonly("is_complete", [](TracingState& s) {
-      return s.is_complete();
-    });
+  py::class_<TracingState, std::shared_ptr<TracingState>>(
+      m, "TracingState", py::dynamic_attr())
+      // NB: no constructor; you have to get it from C++ code
+      .def(
+          "__repr__",
+          [](const TracingState& s) {
+            std::ostringstream ss;
+            ss << "<TracingState " << (const void*)&s << ">";
+            return ss.str();
+          })
+      .def(
+          "__str__",
+          [](const TracingState& s) -> std::string {
+            if (s.is_expired())
+              return "<expired TracingState>";
+            std::ostringstream ss;
+            ss << *s.graph;
+            return ss.str();
+          })
+      .def(
+          "push_scope",
+          [](TracingState& s, const std::string& scope_name) {
+            ASSERT_UNEXPIRED("push_scope");
+            s.push_scope(scope_name);
+          })
+      .def(
+          "pop_scope",
+          [](TracingState& s) {
+            ASSERT_UNEXPIRED("pop_scope");
+            s.pop_scope();
+          })
+      .def(
+          "export",
+          [](TracingState& s,
+             const std::vector<at::Tensor>& initializers,
+             int64_t onnx_opset_version,
+             bool defer_weight_export = false) {
+            ASSERT_UNEXPIRED("export");
+            std::string graph;
+            RawDataExportMap export_map;
+            std::tie(graph, export_map) = ExportGraph(
+                s.graph, initializers, onnx_opset_version, defer_weight_export);
+            std::unordered_map<std::string, py::bytes>
+                python_serialized_export_map;
+            for (auto& kv : export_map) {
+              python_serialized_export_map[kv.first] = py::bytes(kv.second);
+            }
+            return std::make_tuple(
+                py::bytes(graph), python_serialized_export_map);
+          })
+      .def("graph", [](TracingState& s) { return s.graph; })
+      .def_property_readonly(
+          "is_expired", [](TracingState& s) { return s.is_expired(); })
+      .def_property_readonly(
+          "is_complete", [](TracingState& s) { return s.is_complete(); });
 
   m.def("_tracer_enter", [](variable_list trace_inputs, std::size_t num_backwards) {
     return tracer::enter(std::move(trace_inputs), num_backwards + 1);
