@@ -94,6 +94,7 @@ struct MicroProto {
     pb_callback_t r;
     r.funcs.encode = &micropb_callback<std::string, nullptr>;
     r.arg = static_cast<void*>(slot);
+    std::cout << "setting string field " << s << std::endl;
     return r; // RVO
   }
 
@@ -202,6 +203,7 @@ private:
   std::string name; // namespace ValueInfoProto.
   unique_vector<int64_t> dims;
   at::Tensor raw_data;
+  std::string external_data_ref;
 public:
   TensorProto() : MicroProto(onnx_TensorProto_init_default) {
     proto.dims       = list<int64_t>(&dims);
@@ -211,6 +213,7 @@ public:
   // Google Protobuf divergence!
   void set_raw_data(const at::Tensor& t) { proto.raw_data = string_from_tensor(&raw_data, t); }
   void set_data_type(onnx_TensorProto_DataType t) { proto.has_data_type = true; proto.data_type = t; }
+  void set_external_data_ref(const std::string& ref) { proto.external_data_ref = string(&external_data_ref, ref); }
 };
 
 class TensorShapeProto : public MicroProto<onnx_TensorShapeProto> {

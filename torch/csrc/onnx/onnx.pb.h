@@ -189,6 +189,7 @@ typedef struct _onnx_TensorProto {
     pb_callback_t double_data;
     pb_callback_t uint64_data;
     pb_callback_t doc_string;
+    pb_callback_t external_data_ref;
 /* @@protoc_insertion_point(struct:onnx_TensorProto) */
 } onnx_TensorProto;
 
@@ -201,7 +202,7 @@ typedef struct _onnx_TensorProto {
 #define onnx_ModelProto_init_default             {false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
 #define onnx_StringStringEntryProto_init_default {{{NULL}, NULL}, {{NULL}, NULL}}
 #define onnx_GraphProto_init_default             {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
-#define onnx_TensorProto_init_default            {{{NULL}, NULL}, false, (onnx_TensorProto_DataType)0, false, onnx_TensorProto_Segment_init_default, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
+#define onnx_TensorProto_init_default            {{{NULL}, NULL}, false, (onnx_TensorProto_DataType)0, false, onnx_TensorProto_Segment_init_default, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
 #define onnx_TensorProto_Segment_init_default    {false, 0, false, 0}
 #define onnx_TensorShapeProto_init_default       {{{NULL}, NULL}}
 #define onnx_TensorShapeProto_Dimension_init_default {false, 0, {{NULL}, NULL}}
@@ -214,7 +215,7 @@ typedef struct _onnx_TensorProto {
 #define onnx_ModelProto_init_zero                {false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
 #define onnx_StringStringEntryProto_init_zero    {{{NULL}, NULL}, {{NULL}, NULL}}
 #define onnx_GraphProto_init_zero                {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
-#define onnx_TensorProto_init_zero               {{{NULL}, NULL}, false, (onnx_TensorProto_DataType)0, false, onnx_TensorProto_Segment_init_zero, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
+#define onnx_TensorProto_init_zero               {{{NULL}, NULL}, false, (onnx_TensorProto_DataType)0, false, onnx_TensorProto_Segment_init_zero, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
 #define onnx_TensorProto_Segment_init_zero       {false, 0, false, 0}
 #define onnx_TensorShapeProto_init_zero          {{{NULL}, NULL}}
 #define onnx_TensorShapeProto_Dimension_init_zero {false, 0, {{NULL}, NULL}}
@@ -286,6 +287,7 @@ typedef struct _onnx_TensorProto {
 #define onnx_TensorProto_raw_data_tag            9
 #define onnx_TensorProto_double_data_tag         10
 #define onnx_TensorProto_uint64_data_tag         11
+#define onnx_TensorProto_external_data_ref_tag   13
 
 /* Struct field encoding specification for nanopb */
 extern const pb_field_t onnx_AttributeProto_fields[14];
@@ -294,7 +296,7 @@ extern const pb_field_t onnx_NodeProto_fields[8];
 extern const pb_field_t onnx_ModelProto_fields[10];
 extern const pb_field_t onnx_StringStringEntryProto_fields[3];
 extern const pb_field_t onnx_GraphProto_fields[8];
-extern const pb_field_t onnx_TensorProto_fields[13];
+extern const pb_field_t onnx_TensorProto_fields[14];
 extern const pb_field_t onnx_TensorProto_Segment_fields[3];
 extern const pb_field_t onnx_TensorShapeProto_fields[2];
 extern const pb_field_t onnx_TensorShapeProto_Dimension_fields[3];

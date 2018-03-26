@@ -2,6 +2,9 @@ import functools
 import types
 
 
+ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
+
+
 def _export(*args, **kwargs):
     from torch.onnx import utils
     return utils._export(*args, **kwargs)
