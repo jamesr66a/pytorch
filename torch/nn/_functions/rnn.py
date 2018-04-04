@@ -309,8 +309,47 @@ def RNN(*args, **kwargs):
         import torch
         if torch._C._jit_is_tracing(input):
             import torch.onnx.symbolic
+            sym = torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs)
+            def rnn_trace_override_symbolic(g, input, weights, hiddens, batch_sizes):
+                num_layers = len(weights)
+                num_weights = 0
+                for x in weights:
+                    for y in x:
+                        num_weights += 1
+                weights_per_layer = num_weights // num_layers
+                num_hiddens = len(hiddens)
+                def forward_flattened_wrapper(input, *args):
+                    args_offset = 0
+                    weights = []
+                    for i in range(num_layers):
+                        weights.append(args[args_offset:args_offset+weights_per_layer])
+                        args_offset += weights_per_layer
+                    hiddens = args[args_offset:-1]
+                    batch_sizes = args[-1]
+                    outputs = func(input, weights, hiddens, batch_sizes)
+                    outs_flattened = [outputs[0]]
+                    for o in outputs[1]:
+                        outs_flattened.append(o)
+                    return tuple(outs_flattened)
+                def symbolic_flattened_wrapper(g, input, *args):
+                    args_offset = 0
+                    weights = []
+                    for i in range(num_layers):
+                        weights.append(args[args_offset:args_offset+weights_per_layer])
+                        args_offset += weights_per_layer
+                    hiddens = args[args_offset:-1]
+                    batch_sizes = args[-1]
+                    return sym(g, input, weights, hiddens, batch_sizes)
+                flattened_weights = itertools.chain.from_iterable(weights)
+                outputs = g.wrapPyFuncWithSymbolic(
+                    forward_flattened_wrapper,
+                    [input, *flattened_weights, *hiddens, batch_sizes],
+                    3,
+                    symbolic_flattened_wrapper
+                )
+                return tuple(o for o in outputs)
             decorator = torch.onnx.symbolic_override_first_arg_based(
-                torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs))
+                rnn_trace_override_symbolic)
             func = decorator(func)
 
         return func(input, *fargs, **fkwargs)
