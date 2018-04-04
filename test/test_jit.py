@@ -17,6 +17,8 @@ import numpy as np
 import tempfile
 import shutil
 
+import torch.onnx.utils
+
 from torch.jit.frontend import NotSupportedError
 
 try:
@@ -2068,16 +2070,18 @@ class TestScript(TestCase):
         class PadPackedWrapper(torch.nn.Module):
             def __init__(self):
                 super(PadPackedWrapper, self).__init__()
+                self.rnn = torch.nn.LSTM(input_size=7, hidden_size=7, num_layers=5)
 
             def forward(self, x, seq_lens):
                 x = pack_padded_sequence(x, seq_lens)
+                x, _ = self.rnn(x)
                 x, _ = pad_packed_sequence(x)
                 return x
 
         x = torch.zeros(T, B, C)
         seq_lens = torch.ones(B, dtype=torch.int32)
         m = PadPackedWrapper()
-        m_traced = torch.jit.trace(x, seq_lens)(PadPackedWrapper())
+        m_traced = torch.jit.trace(x, seq_lens)(m)
         self.assertEqual(m_traced(x, seq_lens), m(x, seq_lens))
 
         f = io.BytesIO()
