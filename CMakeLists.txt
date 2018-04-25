@@ -38,7 +38,7 @@ cmake_dependent_option(
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
 option(USE_ACL "Use ARM Compute Library" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)
-option(USE_ATEN "Use ATen" OFF)
+option(USE_ATEN "Use ATen" ON)
 option(USE_CUDA "Use Cuda" ON)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" ON)

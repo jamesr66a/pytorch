@@ -736,6 +736,35 @@ Operation getOperation(jit::Node* node, bool values_are_variables) {
       return 0;
     };
   IR_ELSE()
+    switch (node->kind()) {
+      case onnx::Reshape: {
+        return [=](Stack& stack) {
+          auto shape = pop(stack).contiguous();
+          auto input = pop(stack);
+          JIT_ASSERT(shape.ndimension() == 1);
+          at::IntList shape_list(shape.data<int64_t>(), shape.size(0));
+          stack.push_back(input.reshape(shape_list));
+          return 0;
+        };
+      } break;
+      case onnx::Shape: {
+        return [=](Stack& stack) {
+          auto t = pop(stack);
+          at::IntList sizes = t.sizes();
+          auto sizes_tensor = at::CPU(at::kLong).tensor(sizes.size());
+          auto accessor = sizes_tensor.accessor<int64_t, 1>();
+          for (size_t i=0; i<sizes.size(); ++i) {
+            accessor[i] = sizes[i];
+          }
+          if (values_are_variables) {
+            sizes_tensor = torch::autograd::make_variable(sizes_tensor);
+          }
+          stack.push_back(sizes_tensor);
+          return 0;
+        };
+      } break;
+      default: ;
+    };
     return getTensorOp(node).op;
   IR_END()
 }
@@ -777,7 +806,7 @@ struct CodeImpl {
   CodeImpl(std::shared_ptr<Graph>& graph_, bool values_are_variables)
       : values_are_variables(values_are_variables), preprocess(*graph_) {
     graph = preprocess.graph;
-    //std::cout << "into code graph:\n" << *graph << "\n";
+    std::cout << "into code graph:\n" << *graph << "\n";
     insertNodesFromBlock(graph->block());
   }
 
@@ -1053,16 +1082,16 @@ struct InterpreterStateImpl {
     registers(function->register_size) {
   }
   void runOneStage(Stack & stack) {
-    // std::cout << "running stage: " << current_stage << " of " << function->stage_end.size() << "\n";
-    // std::cout << *function->graph << "\n";
-    // function->dump(std::cout);
+    std::cout << "running stage: " << current_stage << " of " << function->stage_end.size() << "\n";
+    std::cout << *function->graph << "\n";
+    function->dump(std::cout);
     size_t pc = current_pc;
     size_t last = function->stage_end[current_stage];
     auto & instructions = function->instructions;
     while(pc < last) {
-        // std::cout << "executing " << pc << ": ";
-        // function->dumpInstruction(std::cout, pc);
-        // std::cout << "\n";
+        std::cout << "executing " << pc << ": ";
+        function->dumpInstruction(std::cout, pc);
+        std::cout << "\n";
         try {
           auto & inst = instructions[pc];
           loadTensorsFromRegisters(inst.inputs, stack);
@@ -1070,7 +1099,7 @@ struct InterpreterStateImpl {
           for(int i = inst.outputs.size - 1; i >= 0; i--) {
             int reg = get(inst.outputs,i);
             registers[reg] = pop(stack);
-            // std::cout << "pop reg[" << reg << "];\n" << registers[reg].pImpl << "\n";
+            std::cout << "pop reg[" << reg << "];\n" << registers[reg].pImpl << "\n";
           }
           pc = new_pc;
         } catch(std::exception & e) {
@@ -1095,7 +1124,7 @@ struct InterpreterStateImpl {
   void loadTensorsFromRegisters(const UseList & uses, Stack & stack) {
     for(int i = 0; i < uses.values.size; i++) {
       int reg = get(uses.values,i);
-      // std::cout << "push reg[" << reg << "];\n" << registers[reg] << "\n\n";
+      std::cout << "push reg[" << reg << "];\n" << registers[reg] << "\n\n";
       if(get(uses.free_flags,i)) {
         stack.push_back(std::move(registers[reg]));
       } else {
