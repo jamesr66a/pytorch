@@ -341,7 +341,8 @@ void PropagateShapeOnNode(Node * node) {
     // Additionally, passing in a zero representative tensor into an integer
     // division op causes divide-by-zero errors
     bool shape_inferenceable = !std::any_of(types.begin(), types.end(), [](TensorType* t){
-      return at::isIntegralType(t->scalarType());
+      // return at::isIntegralType(t->scalarType());
+      return false;
     });
     if (!shape_inferenceable) {
       setDynamicType(node);

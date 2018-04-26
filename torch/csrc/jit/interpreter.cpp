@@ -806,7 +806,7 @@ struct CodeImpl {
   CodeImpl(std::shared_ptr<Graph>& graph_, bool values_are_variables)
       : values_are_variables(values_are_variables), preprocess(*graph_) {
     graph = preprocess.graph;
-    std::cout << "into code graph:\n" << *graph << "\n";
+    // std::cout << "into code graph:\n" << *graph << "\n";
     insertNodesFromBlock(graph->block());
   }
 
@@ -1082,16 +1082,17 @@ struct InterpreterStateImpl {
     registers(function->register_size) {
   }
   void runOneStage(Stack & stack) {
-    std::cout << "running stage: " << current_stage << " of " << function->stage_end.size() << "\n";
-    std::cout << *function->graph << "\n";
-    function->dump(std::cout);
+    // std::cout << "running stage: " << current_stage << " of " << function->stage_end.size() << "\n";
+    // std::cout << *function->graph << "\n";
+    // function->dump(std::cout);
     size_t pc = current_pc;
     size_t last = function->stage_end[current_stage];
     auto & instructions = function->instructions;
     while(pc < last) {
-        std::cout << "executing " << pc << ": ";
-        function->dumpInstruction(std::cout, pc);
-        std::cout << "\n";
+        // std::cout << "last pc " << last << std::endl;
+        // std::cout << "executing " << pc << ": ";
+        // function->dumpInstruction(std::cout, pc);
+        // std::cout << "\n";
         try {
           auto & inst = instructions[pc];
           loadTensorsFromRegisters(inst.inputs, stack);
@@ -1099,7 +1100,8 @@ struct InterpreterStateImpl {
           for(int i = inst.outputs.size - 1; i >= 0; i--) {
             int reg = get(inst.outputs,i);
             registers[reg] = pop(stack);
-            std::cout << "pop reg[" << reg << "];\n" << registers[reg].pImpl << "\n";
+            // std::cout << "pop reg[" << reg << "];\n";
+            // std::cout << "pop reg[" << reg << "];\n" << registers[reg].pImpl << "\n";
           }
           pc = new_pc;
         } catch(std::exception & e) {
@@ -1124,7 +1126,8 @@ struct InterpreterStateImpl {
   void loadTensorsFromRegisters(const UseList & uses, Stack & stack) {
     for(int i = 0; i < uses.values.size; i++) {
       int reg = get(uses.values,i);
-      std::cout << "push reg[" << reg << "];\n" << registers[reg] << "\n\n";
+      // std::cout << "push reg[" << reg << "]\n";
+      // std::cout << "push reg[" << reg << "];\n" << registers[reg] << "\n\n";
       if(get(uses.free_flags,i)) {
         stack.push_back(std::move(registers[reg]));
       } else {

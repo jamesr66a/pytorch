@@ -286,7 +286,7 @@ private:
       // TODO: remove mandatory size checking in BatchMM, otherwise
       // it works fine on variables.
       BatchMM(graph);
-      FuseGraph(graph);
+      // FuseGraph(graph);
     }
   }
   const Code & getOrCreateAutogradFallback() {

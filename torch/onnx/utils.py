@@ -144,7 +144,9 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
     if isinstance(model, torch.jit.ScriptModule):
         torch_out = None
         try:
+            import pdb; pdb.set_trace()
             method = model.__getattr__('forward')
+            # graph = method.graph
             graph = method.propagate_shapes(args, False)
             params = method.params()
         except AttributeError:

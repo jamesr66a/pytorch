@@ -270,6 +270,10 @@ def transpose(g, self, dim0, dim1):
     return g.op("Transpose", self, perm_i=axes)
 
 
+def repeat(g, self, repeats):
+    return g.op("Tile", self, repeats_i=repeats)
+
+
 def permute(g, self, dims):
     if dims == list(range(0, len(dims))):
         return self
