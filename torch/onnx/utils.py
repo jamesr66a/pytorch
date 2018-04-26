@@ -136,16 +136,20 @@ def _trace_and_get_graph_from_model(model, args, training):
 
 
 def _model_to_graph(model, args, f, verbose=False, training=False,
-                    input_names=None, output_names=None, aten=False):
+                    input_names=None, output_names=None, aten=False,
+                    example_outputs=None):
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.Tensor):
         args = (args, )
 
     if isinstance(model, torch.jit.ScriptModule):
         torch_out = None
+        assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
+        if isinstance(example_outputs, torch.Tensor):
+            example_outputs = [example_outputs]
         try:
             method = model.__getattr__('forward')
-            graph = method.propagate_shapes(args, False)
+            graph = method.propagate_and_assign_input_and_output_shapes(args, example_outputs, False)
             params = method.params()
         except AttributeError:
             # TODO: just trace it
@@ -164,10 +168,12 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
 
 
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
-                             input_names=None, output_names=None, aten=False, export_type=ExportTypes.PROTOBUF_FILE):
+                             input_names=None, output_names=None, aten=False, export_type=ExportTypes.PROTOBUF_FILE,
+                             example_outputs=None):
     graph, params, torch_out = _model_to_graph(model, args, f, verbose,
                                                training, input_names,
-                                               output_names, aten)
+                                               output_names, aten,
+                                               example_outputs)
 
     from torch.onnx.symbolic import _onnx_opset_version
     return graph.prettyPrintExport(params, _onnx_opset_version, False)
@@ -178,10 +184,11 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 # this output will be None, since we are not doing any tracing but rather
 # directly extracting the graph.
 def _export(model, args, f, export_params=True, verbose=False, training=False,
-            input_names=None, output_names=None, aten=False, export_type=ExportTypes.PROTOBUF_FILE):
+            input_names=None, output_names=None, aten=False, export_type=ExportTypes.PROTOBUF_FILE,
+            example_outputs=None):
     graph, params, torch_out = _model_to_graph(model, args, f, verbose,
                                                training, input_names,
-                                               output_names, aten)
+                                               output_names, aten, example_outputs)
     # TODO: Don't allocate a in-memory string for the protobuf
     from torch.onnx.symbolic import _onnx_opset_version
     defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
