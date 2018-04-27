@@ -307,6 +307,9 @@ void initPythonIRBindings(PyObject * module_) {
           return "";
         }
     })
+    .def("is_concrete", [](Type& t) {
+      return t.cast<TensorType>() != nullptr;
+    })
     .def("sizes",[](Type& t) {
       return t.expect<TensorType>()->sizes();
     })
