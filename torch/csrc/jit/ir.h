@@ -199,9 +199,12 @@ public:
   size_t unique() const {
     return unique_;
   }
+  bool hasUniqueName() const {
+    return unique_name_ != "";
+  }
   Value* setUniqueName(const std::string & name);
   std::string uniqueName() const {
-    if (unique_name_ != "")
+    if (hasUniqueName())
       return unique_name_;
     return std::to_string(unique());
   }
@@ -826,7 +829,7 @@ private:
   std::unordered_set<const Block*> all_blocks;
   size_t next_unique_;
 
-  std::unordered_set<std::string> unique_names_;
+  std::unordered_map<std::string, Value*> unique_names_;
 
   size_t new_node_stage_;
 
@@ -1076,6 +1079,8 @@ private:
     JIT_ASSERT(it != all_values.end());
     delete *it;
     all_values.erase(it);
+    if(v->hasUniqueName())
+      unique_names_.erase(v->unique_name_);
   }
   void freeBlock(Block * b) {
     auto it = all_blocks.find(b);
@@ -1193,19 +1198,24 @@ inline void Node::cloneFrom(Node * s) {
 	copyAttributes(*s);
 }
 
-inline Value* Value::setUniqueName(const std::string & orig_name) {
-  if (orig_name.find_first_not_of("0123456789") == std::string::npos) {
-    throw std::runtime_error("names may not be integers: " + orig_name);
+inline Value* Value::setUniqueName(const std::string & name) {
+  if (name.find_first_not_of("0123456789") == std::string::npos) {
+    throw std::runtime_error("names may not be integers: " + name);
   }
   auto & names = node()->owningGraph()->unique_names_;
-  auto name = orig_name;
-  for(size_t i = 1; names.find(name) != names.end(); i++) {
-    std::stringstream ss;
-    ss << orig_name << "." << i;
-    name = ss.str();
+  auto old_owner_of_name = names.find(name);
+  if(old_owner_of_name != names.end()) {
+    size_t suffix = 1;
+    std::string replacement_name;
+    do {
+      std::stringstream ss;
+      ss << name << "." << suffix++;
+      replacement_name = ss.str();
+    } while(names.count(replacement_name) > 0);
+    old_owner_of_name->second->setUniqueName(replacement_name);
   }
-  names.insert(name);
-  unique_name_ = std::move(name);
+  names[name] = this;
+  unique_name_ = name;
   return this;
 }
 
