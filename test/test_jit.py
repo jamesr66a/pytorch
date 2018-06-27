@@ -4087,6 +4087,44 @@ def func(t):
             def some_func(x):
                 return sm(x)
 
+    def test_set_train_scriptmodule(self):
+        class ScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+
+            def forward(self, x):
+                return torch.mm(x, self.param)
+
+        sm = ScriptMod()
+        self.assertTrue(sm.training)
+        sm.train(False)
+        self.assertFalse(sm.training)
+
+        sm.train(True)
+        self.assertTrue(sm.training)
+        sm.eval()
+        self.assertFalse(sm.training)
+
+    @unittest.skipIf(not RUN_CUDA, "Device test requires CUDA")
+    def test_set_device_scriptmodule(self):
+        class ScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+
+            def forward(self, x):
+                return torch.mm(x, self.param)
+
+        sm = ScriptMod()
+        self.assertEqual(sm.param.device, torch.device('cpu'))
+        sm.cuda()
+        self.assertEqual(sm.param.device, torch.device('cuda', index=0))
+        sm.to(device=torch.device('cpu'))
+        self.assertEqual(sm.param.device, torch.device('cpu'))
+        sm.to(device=torch.device('cuda'))
+        self.assertEqual(sm.param.device, torch.device('cuda', index=0))
+
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
 

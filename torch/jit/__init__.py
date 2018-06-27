@@ -629,7 +629,7 @@ _compiled_methods_whitelist = {
     'state_dict', 'load_state_dict', '_load_from_state_dict', 'parameters',
     'named_parameters', '_all_buffers', 'children', 'named_children', 'modules',
     'named_modules', 'zero_grad', 'share_memory', '_get_name', 'extra_repr',
-    '_slow_forward', '_tracing_name'
+    '_slow_forward', '_tracing_name', 'to', 'train', 'eval', 'cpu', 'cuda'
 }
 
 
