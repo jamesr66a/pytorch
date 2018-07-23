@@ -265,7 +265,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     return torch_out
 
 
-def _export_module(module, operator_export_type=OperatorExportTypes.ONNX, export_type=ExportTypes.PROTOBUF_FILE):
+def _export_module(module, f, operator_export_type=OperatorExportTypes.ONNX, export_type=ExportTypes.PROTOBUF_FILE):
     # TODO: Don't allocate a in-memory string for the protobuf
     from torch.onnx.symbolic import _onnx_opset_version
 
@@ -278,7 +278,7 @@ def _export_module(module, operator_export_type=OperatorExportTypes.ONNX, export
             else zipfile.ZIP_STORED
         with zipfile.ZipFile(f, 'w', compression=compression) as z:
             z.writestr('__MODEL_PROTO', proto)
-            for k, v in export_map.items():
+            for k, v in storage_map.items():
                 z.writestr(k, v)
     elif export_type in [ExportTypes.DIRECTORY, ExportTypes.PROTOBUF_FILE]:
         raise RuntimeError('Unsupported export type')

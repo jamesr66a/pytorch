@@ -3055,6 +3055,31 @@ def func(t):
             o = m(input)
             self.assertEqual(o, input + torch.ones([2, 2], dtype=torch.float))
 
+    def test_script_module_file_export(self):
+        from torch.onnx import OperatorExportTypes, ExportTypes
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+
+            @torch.jit.script_method
+            def foo(self):
+                return torch.ones([2, 2])
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return input + torch.ones([2, 2])
+
+        m_orig = M()
+        m_import = torch.jit.ScriptModule()
+        import io
+        f = io.BytesIO()
+        torch.onnx._export_module(m_orig, f, OperatorExportTypes.RAW, ExportTypes.ZIP_ARCHIVE)
+        f.seek(0)
+        import zipfile
+        with zipfile.ZipFile(f, 'r', compression=zipfile.ZIP_STORED) as z:
+            self.assertExpected(str([file.filename for file in z.infolist()]))
+
+
     def test_onnx_export_script_module(self):
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):
