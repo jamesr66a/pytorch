@@ -99,27 +99,6 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       throw ErrorReport(loc) << "keyword arguments in Python calls aren't supported";
     Graph& g = *m.graph();
 
-    // this python object might be a @trace or @script function/module
-    // if so, inline the graph rather than calling the python
-
-    if(py::isinstance<Module>(self)) {
-      Module& mod = py::cast<Module&>(self);
-      if (Method * forward = mod.find_method("forward")) {
-        // This code path should only get called for Modules that are really
-        // wrappers around pure script/traced functions. Modules with parameters
-        // should be submodules of the caller, and thus will be represented as
-        // ModuleValue and not go through here.
-        if (mod.get_parameters().size() != 0) {
-          throw ErrorReport(loc) << "Attempted to inline a Module with parameters. "
-            "Stateful modules to be inlined must be submodules of the callee.";
-        }
-        std::vector<torch::jit::NamedValue> named_inputs;
-        for (auto inp : inputs)
-          named_inputs.push_back(NamedValue(loc, "", inp));
-        return packOutputs(*m.graph(), m.emit_call_to(loc, *forward, named_inputs, {}));
-      }
-    }
-
     // Release the function object so we can wrap it in a PythonOp
     py::object func = self;
     std::string cconv(inputs.size(), 't');
@@ -248,17 +227,6 @@ std::shared_ptr<SugaredValue> PythonValue::attr(SourceRange loc, Method & m, con
   throw ErrorReport(loc) << "unsupported attribute lookup on " << py::repr(self) << ".";
 }
 
-Resolver pythonResolver(ResolutionCallback rcb) {
-  return [=](const std::string& name) -> std::shared_ptr<SugaredValue> {
-      AutoGIL ag;
-      py::object obj = rcb(name);
-      if(obj.is(py::none())) {
-        return nullptr;
-      }
-      return std::make_shared<PythonValue>(obj);
-  };
-}
-
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
 // in the future, we will add the ability to resolve `self.foo` to python
@@ -339,7 +307,7 @@ struct ModuleValue : public SugaredValue {
     return result;
   }
 
-private:
+ private:
   std::shared_ptr<Module> module;
 };
 
@@ -374,6 +342,27 @@ py::object runMethodFromPython(Method& m, py::args args) {
   auto stack = createStack(args);
   m.run(stack);
   return wrapStack(std::move(stack));
+}
+
+Resolver pythonResolver(ResolutionCallback rcb) {
+  return [=](const std::string& name) -> std::shared_ptr<SugaredValue> {
+      AutoGIL ag;
+      py::object obj = rcb(name);
+      if(obj.is(py::none())) {
+        return nullptr;
+      }
+      // Inline *ONLY PURE* ScriptModules. This allows us to call arbitrary
+      // @script functions within a scripting context.
+      if (py::isinstance<Module>(obj)) {
+        auto mod = py::cast<std::shared_ptr<Module>>(obj);
+        if (mod->get_parameters().size() != 0) {
+          throw ErrorReport() << "Attempted to inline a Module with parameters. "
+            "Stateful modules to be inlined must be submodules of the callee.";
+        }
+        return std::make_shared<ModuleValue>(mod);
+      }
+      return std::make_shared<PythonValue>(obj);
+  };
 }
 
 void initJitScriptBindings(PyObject* module) {
