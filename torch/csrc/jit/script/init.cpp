@@ -90,22 +90,30 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
         throw ErrorReport(loc) << "type mismatch at argument " << i << ": expected "
                                << arguments[i]->str() << ", but got " << inputs[i]->type()->str();
     }
-    // We have to do this check here, because implementation of this function is tightly
-    // coupled with the impl for PythonOp in the interpreter. Right now it assumes that
-    // all inputs taken from the stack are Tensors, so that's what we have to do.
-    ensureTensors(loc, inputs);
-
     if (attributes.size() > 0)
       throw ErrorReport(loc) << "keyword arguments in Python calls aren't supported";
-    Graph& g = *m.graph();
+    std::vector<Argument> arguments_args, returns_args;
+    for (auto &arg_type : arguments) {
+      arguments_args.push_back(Argument("", arg_type, {}, {}, false));
+    }
+    for (auto &ret_type : returns) {
+      returns_args.push_back(Argument("", ret_type, {}, {}, false));
+    }
+    auto schema = FunctionSchema("", arguments_args, returns_args);
+
+    std::stringstream failure_messages;
+    at::optional<std::vector<Value*>> all_inputs =
+      tryMatchSchema(schema, loc, *m.graph(), inputs_, {}, failure_messages);
+    if (!all_inputs)
+      throw ErrorReport(loc) << failure_messages.str();
 
     // Release the function object so we can wrap it in a PythonOp
     py::object func = self;
     std::string cconv(inputs.size(), 't');
-    Node* new_node = g.insertNode(g.createPythonOp(
+    Node* new_node = m.graph()->insertNode(m.graph()->createPythonOp(
       THPObjectPtr(func.release().ptr()), cconv, {}));
     new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
-    for(auto i : inputs)
+    for(auto &i : *all_inputs)
       new_node->addInput(i);
 
     // This is really dumb, but relaxing the constraints on return types would

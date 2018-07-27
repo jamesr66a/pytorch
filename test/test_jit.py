@@ -4335,7 +4335,6 @@ def func(t):
                 # type: (Tuple[Tensor, Tensor]) -> Tensor
                 return x + 1
 
-    @unittest.skip('https://github.com/pytorch/pytorch/issues/9595')
     def test_inline_and_run_annotated_script_fn(self):
         @torch.jit.script
         def to_inline(x, y):
@@ -4346,7 +4345,8 @@ def func(t):
         def some_func(x):
             return to_inline((x, x), x)
 
-        some_func(torch.rand(3, 4))
+        x = torch.rand(3, 4)
+        self.assertEqual(some_func(x), x)
 
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
