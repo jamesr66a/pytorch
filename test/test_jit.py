@@ -2882,7 +2882,7 @@ def func(t):
                 f.write(code)
             fn = get_fn('test_type_annotation_py3', script_path)
 
-            with self.assertRaisesRegex(RuntimeError, r"expected Tensor, but got"):
+            with self.assertRaisesRegex(RuntimeError, r"expected a value of type Tensor for argument '0' but found \(Tensor, Tensor\)"):
                 @torch.jit.script
                 def bad_fn(x):
                     x, y = fn((x, x), x, x)
@@ -2941,13 +2941,13 @@ def func(t):
                 y = self.baz(x)
                 return x
 
-        with self.assertRaisesRegex(RuntimeError, "incorrect number of arguments: expected 1, but got 2"):
+        with self.assertRaisesRegex(RuntimeError, "expected at most 1 arguments but found 2"):
             ModuleTooMany()
-        with self.assertRaisesRegex(RuntimeError, "incorrect number of arguments: expected 2, but got 1"):
+        with self.assertRaisesRegex(RuntimeError, "argument 1 not provided"):
             ModuleTooFew()
         with self.assertRaisesRegex(RuntimeError, "need 3 values .* found only 2"):
             ModuleTooManyAssign()
-        with self.assertRaisesRegex(RuntimeError, "incorrect number of arguments: expected 2, but got 1"):
+        with self.assertRaisesRegex(RuntimeError, "argument 1 not provided."):
             ModuleDefault()
 
     def test_script_define_order(self):
@@ -3752,18 +3752,6 @@ def func(t):
             def wrong_use_as_callable(x):
                 return x(3, 4, 5)
 
-    def test_wrong_python_kwarg_call(self):
-        with self.assertRaisesRegex(RuntimeError, 'keyword arguments in Python calls aren\'t supported'):
-            # NB: the only way I could get to this code path is if I made the
-            # python function have 0 inputs, since we interpret all the inputs to
-            # the function as inputs (including those with defaults) and not kwargs
-            def test_fn():
-                return 3
-
-            @torch.jit.script
-            def wrong_python_kwarg_call(self):
-                return test_fn(attr=6)
-
     def test_python_val_doesnt_have_attr(self):
         with self.assertRaisesRegex(RuntimeError, 'object has no attribute abcd'):
             def test_fn():
@@ -3782,7 +3770,7 @@ def func(t):
                 return io.BytesIO
 
     def test_wrong_method_call_inputs(self):
-        with self.assertRaisesRegex(RuntimeError, 'argument \'y\' not provided'):
+        with self.assertRaisesRegex(RuntimeError, 'argument y not provided'):
             class SomeModule(torch.jit.ScriptModule):
 
                 @torch.jit.script_method

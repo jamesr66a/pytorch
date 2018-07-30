@@ -435,7 +435,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         return at::nullopt;
       }
       if(positional_inputs[*idx]) {
-        err() << "argument '" <<  nv.name << "' specified twice \n" << nv.loc;
+        err() << "argument " <<  nv.name << " specified twice \n" << nv.loc;
         return at::nullopt;
       }
       positional_inputs[*idx] = nv;
@@ -446,7 +446,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         continue;
       auto default_value = schema.arguments[i].default_value;
       if(!default_value) {
-        err() << "argument '" << schema.arguments[i].name << "' not provided.\n" << loc;
+        err() << "argument " << schema.arguments[i].name << " not provided.\n" << loc;
         return at::nullopt;
       }
       positional_inputs[i] = NamedValue(

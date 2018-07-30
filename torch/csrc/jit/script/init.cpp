@@ -49,14 +49,26 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   PythonValue(py::object self)
   : self(std::move(self)) {}
 
-  std::tuple<std::vector<TypePtr>, std::vector<TypePtr>> getArgumentTypes(const size_t n_args, const size_t n_binders) {
+  FunctionSchema getSchema(const size_t n_args, const size_t n_binders) {
     auto annotations = py::module::import("torch.jit.annotations");
     auto signature = annotations.attr("get_signature")(self);
+    std::vector<Argument> args, rets;
     // We may mutate this if we can determine the number of args from Python
     // introspection.
     size_t actual_n_args = n_args;
     if (!signature.is_none()) {
-      return py::cast<std::pair<std::vector<TypePtr>, std::vector<TypePtr>>>(signature);
+      std::vector<TypePtr> arg_types, ret_types;
+      std::tie(arg_types, ret_types) = py::cast<std::pair<std::vector<TypePtr>, std::vector<TypePtr>>>(signature);
+      args.reserve(arg_types.size());
+      size_t idx = 0; // Fake argument names by putting in the index
+      for (auto &arg_type : arg_types) {
+        args.push_back(Argument(std::to_string(idx++), std::move(arg_type), {}, {}, false));
+      }
+      rets.reserve(ret_types.size());
+      idx = 0;
+      for (auto &ret_type : ret_types) {
+        rets.push_back(Argument(std::to_string(idx++), std::move(ret_type), {}, {}, false));
+      }
     } else {
       // Create a default signature using what information we have
 
@@ -71,39 +83,26 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       }
       // Construct the default signature: all arguments and returns will be
       // DynamicType
-      return std::make_pair(std::vector<TypePtr>(actual_n_args, DynamicType::get()), std::vector<TypePtr>(n_binders, DynamicType::get()));
+      args.reserve(actual_n_args);
+      for (size_t i=0; i < actual_n_args; ++i) {
+        args.push_back(Argument(std::to_string(i), DynamicType::get(), {}, {}, false));
+      }
+      rets.reserve(n_binders);
+      for (size_t i = 0; i < n_binders; ++i) {
+        rets.push_back(Argument(std::to_string(i), DynamicType::get(), {}, {}, false));
+      }
     }
+    return FunctionSchema("", std::move(args), std::move(rets));
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<NamedValue> inputs_, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     auto inputs = toValues(inputs_);
-    std::vector<TypePtr> arguments, returns;
-    std::tie(arguments, returns) = getArgumentTypes(inputs.size(), n_binders);
-
-    if (arguments.size() != inputs.size())
-      throw ErrorReport(loc) << "calling a Python function with an incorrect number "
-                             << "of arguments: expected " << arguments.size() << ", but got "
-                             << inputs.size();
-    for (size_t i = 0; i < arguments.size(); ++i) {
-      if (!inputs[i]->type()->isSubtypeOf(arguments[i]))
-        throw ErrorReport(loc) << "type mismatch at argument " << i << ": expected "
-                               << arguments[i]->str() << ", but got " << inputs[i]->type()->str();
-    }
-    if (attributes.size() > 0)
-      throw ErrorReport(loc) << "keyword arguments in Python calls aren't supported";
-    std::vector<Argument> arguments_args, returns_args;
-    for (auto &arg_type : arguments) {
-      arguments_args.push_back(Argument("", arg_type, {}, {}, false));
-    }
-    for (auto &ret_type : returns) {
-      returns_args.push_back(Argument("", ret_type, {}, {}, false));
-    }
-    auto schema = FunctionSchema("", arguments_args, returns_args);
+    auto schema = getSchema(inputs.size(), n_binders);
 
     std::stringstream failure_messages;
     at::optional<std::vector<Value*>> all_inputs =
-      tryMatchSchema(schema, loc, *m.graph(), inputs_, {}, failure_messages);
+      tryMatchSchema(schema, loc, *m.graph(), inputs_, attributes, failure_messages);
     if (!all_inputs)
       throw ErrorReport(loc) << failure_messages.str();
 
@@ -121,14 +120,14 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     // Note that this effectively makes the return type of Tuple[Tensor] and Tensor
     // equivalent, but the PythonOp impl ends with an optional tuple unpack, so we need
     // to do it.
-    for (auto & ret_type_elem : returns) {
-      if (!ret_type_elem->isSubtypeOf(DynamicType::get())) {
+    for (auto & ret_arg : schema.returns) {
+      if (!ret_arg.type->isSubtypeOf(DynamicType::get())) {
         throw ErrorReport(loc) << "Python functions can currently only return Tensors";
       }
     }
 
     std::vector<Value*> outputs;
-    for(size_t i = 0; i < returns.size(); ++i)
+    for(size_t i = 0; i < schema.returns.size(); ++i)
       outputs.push_back(new_node->addOutput());
     return packOutputs(*m.graph(), outputs);
   }
