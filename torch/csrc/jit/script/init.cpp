@@ -52,8 +52,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Method& m,
     SourceRange loc,
-    bool is_builtin_module = false,
-    const std::string& field_name = "",
     bool is_submodule = false);
 
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
@@ -152,13 +150,6 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   }
 
 protected:
-  bool isBuiltinModule() {
-    // XXX: these can't be static, or they will be destructed after the Python interpreter
-    // exits and that generally sounds like a bad idea
-    py::object torch = py::module::import("torch");
-    py::object functional = py::module::import("torch.nn.functional");
-    return self.is(torch) || self.is(functional);
-  }
 
   py::object getattr(SourceRange loc, const std::string& name) {
     try {
@@ -169,6 +160,38 @@ protected:
   }
 
   py::object self;
+};
+
+struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
+  explicit PythonModuleValue(py::object mod) : PythonValue(mod) {}
+
+  std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
+      py::object member = getattr(loc, field);
+      if (py::isinstance<py::module>(member)) {
+        return std::make_shared<PythonModuleValue>(member);
+      }
+      // We support calling functions and using type/layout/device constants
+      // on the torch builtin modules
+      if (isBuiltinModule()) {
+        if (py::isinstance<py::function>(member)) {
+          return std::make_shared<BuiltinFunction>(field, at::nullopt);
+        }
+        if(THPDtype_Check(member.ptr()) ||
+           THPLayout_Check(member.ptr()) ||
+           THPDevice_Check(member.ptr())) {
+            return toSugaredValue(member, m, loc);
+        }
+      }
+      return std::make_shared<PythonValue>(member);
+  }
+ private:
+   bool isBuiltinModule() {
+     // XXX: these can't be static, or they will be destructed after the Python interpreter
+     // exits and that generally sounds like a bad idea
+     py::object torch = py::module::import("torch");
+     py::object functional = py::module::import("torch.nn.functional");
+     return self.is(torch) || self.is(functional);
+   }
 };
 
 // by using torch.jit.Const, a user can mark a python value constant
@@ -204,7 +227,7 @@ std::shared_ptr<SugaredValue> PythonValue::attr(SourceRange loc, Method & m, con
   // torch, torch.nn.functional, and the functions they expose.
   py::object member = getattr(loc, field);
   if (auto retval =
-          toSugaredValue(member, m, loc, isBuiltinModule(), field)) {
+          toSugaredValue(member, m, loc)) {
     return retval;
   }
   throw ErrorReport(loc) << "unsupported attribute lookup on " << py::repr(self) << ".";
@@ -285,8 +308,6 @@ struct ModuleValue : public SugaredValue {
           obj,
           m,
           loc,
-          /*is_builtin_module =*/false,
-          /*field_name =*/"",
           /*is_submodule =*/true));
     }
     return result;
@@ -300,8 +321,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Method& m,
     SourceRange loc,
-    bool is_builtin_module,
-    const std::string& field_name,
     bool is_submodule) {
   // directly create SimpleValues when possible, because they are first-class
   // and can be re-assigned. Otherwise, this would be invalid:
@@ -340,10 +359,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
              "Stateful modules to be inlined must be submodules of the callee.";
     }
     return std::make_shared<ModuleValue>(mod);
-  } else if (is_builtin_module && py::isinstance<py::function>(obj)) {
-    return std::make_shared<BuiltinFunction>(field_name, at::nullopt);
+  } else if (py::isinstance<py::module>(obj)) {
+    return std::make_shared<PythonModuleValue>(obj);
   } else if (
-      py::isinstance<py::module>(obj) || py::isinstance<py::function>(obj) ||
+      py::isinstance<py::function>(obj) ||
       py::isinstance(obj, py::module::import("torch.nn").attr("Module"))) {
     return std::make_shared<PythonValue>(obj);
   }
