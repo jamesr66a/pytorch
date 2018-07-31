@@ -52,7 +52,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Method& m,
     SourceRange loc,
-    bool allow_default = true,
     bool is_builtin_module = false,
     const std::string& field_name = "",
     bool is_submodule = false);
@@ -205,7 +204,7 @@ std::shared_ptr<SugaredValue> PythonValue::attr(SourceRange loc, Method & m, con
   // torch, torch.nn.functional, and the functions they expose.
   py::object member = getattr(loc, field);
   if (auto retval =
-          toSugaredValue(member, m, loc, false, isBuiltinModule(), field)) {
+          toSugaredValue(member, m, loc, isBuiltinModule(), field)) {
     return retval;
   }
   throw ErrorReport(loc) << "unsupported attribute lookup on " << py::repr(self) << ".";
@@ -286,7 +285,6 @@ struct ModuleValue : public SugaredValue {
           obj,
           m,
           loc,
-          /*allow_default =*/true,
           /*is_builtin_module =*/false,
           /*field_name =*/"",
           /*is_submodule =*/true));
@@ -302,7 +300,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Method& m,
     SourceRange loc,
-    bool allow_default,
     bool is_builtin_module,
     const std::string& field_name,
     bool is_submodule) {
@@ -350,10 +347,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       py::isinstance(obj, py::module::import("torch.nn").attr("Module"))) {
     return std::make_shared<PythonValue>(obj);
   }
-  if (allow_default)
-    return ConstantPythonValue::create(loc, m, obj);
-  else
-    return nullptr;
+  return ConstantPythonValue::create(loc, m, obj);
 }
 
 py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
