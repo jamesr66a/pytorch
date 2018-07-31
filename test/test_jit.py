@@ -3762,7 +3762,7 @@ def func(t):
                 return test_fn.abcd
 
     def test_wrong_module_attr_lookup(self):
-        with self.assertRaisesRegex(RuntimeError, 'unsupported attribute lookup on'):
+        with self.assertRaisesRegex(RuntimeError, 'python value of type \'type\' cannot be used as a value:'):
             import io
 
             @torch.jit.script

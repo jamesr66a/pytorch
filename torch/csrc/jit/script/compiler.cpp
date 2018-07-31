@@ -266,7 +266,7 @@ struct Environment {
     auto retval = createCapturedInputIfNeeded(range, ident);
 
     if(!retval) {
-      retval = resolver(ident);
+      retval = resolver(ident, method, range);
     }
 
     if(!retval) {

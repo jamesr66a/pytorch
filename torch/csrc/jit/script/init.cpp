@@ -45,6 +45,8 @@ inline std::shared_ptr<SugaredValue> toSimple(Value* v) {
   return std::make_shared<SimpleValue>(v);
 }
 
+std::shared_ptr<SugaredValue> toSugaredValue(py::object obj, Method &m, SourceRange loc, bool allow_default=true, bool is_builtin_module=false, const std::string& field_name="", bool is_submodule=false);
+
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   PythonValue(py::object self)
   : self(std::move(self)) {}
@@ -178,36 +180,11 @@ struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
     py::tuple tup = self;
     std::vector<std::shared_ptr<SugaredValue>> result;
     for(size_t i = 0; i < tup.size(); ++i) {
-      result.push_back(create(loc, m, tup[i]));
+      result.push_back(toSugaredValue(tup[i], m, loc));
     }
     return result;
   }
   static std::shared_ptr<SugaredValue> create(SourceRange loc, Method& m, py::object self) {
-    // directly create SimpleValues when possible, because they are first-class
-    // and can be re-assigned. Otherwise, this would be invalid:
-    // f = python_constant
-    // while ...
-    //   f = f + 1
-    auto& g = *m.graph();
-    if(py::isinstance<py::int_>(self)) {
-      return toSimple(insertConstant(g, py::cast<int64_t>(self), loc));
-    } else if(py::isinstance<py::float_>(self)) {
-      return toSimple(insertConstant(g, py::cast<float>(self), loc));
-    } else if(py::isinstance<py::bool_>(self)) {
-      return toSimple(insertConstant(g, py::cast<bool>(self), loc));
-    } else if(THPDevice_Check(self.ptr())) {
-      auto device = (THPDevice*) self.ptr();
-      std::vector<int64_t> v = {static_cast<int64_t>(device->device.type()), device->device.index()};
-      return toSimple(insertConstant(g, std::move(v)));
-    } else if(THPLayout_Check(self.ptr())) {
-      auto layout = (THPLayout*) self.ptr();
-      const auto v = static_cast<int64_t>(layout->layout);
-      return toSimple(insertConstant(g, v, loc));
-    } else if(THPDtype_Check(self.ptr())) {
-      auto dtype = (THPDtype*)(self.ptr());
-      const auto v = static_cast<int64_t>(dtype->scalar_type);
-      return toSimple(insertConstant(g, v, loc));
-    }
     return std::make_shared<ConstantPythonValue>(self);
   }
 };
@@ -217,19 +194,8 @@ std::shared_ptr<SugaredValue> PythonValue::attr(SourceRange loc, Method & m, con
   // make an exception for traversing modules because we want to be access
   // torch, torch.nn.functional, and the functions they expose.
   py::object member = getattr(loc, field);
-  if (isBuiltinModule()) {
-    if(py::isinstance<py::function>(member)) {
-      return std::make_shared<BuiltinFunction>(field, at::nullopt);
-    }
-    //e.g. any tensor attribute objects such as torch.uint8
-    if(THPDtype_Check(member.ptr()) ||
-       THPLayout_Check(member.ptr()) ||
-       THPDevice_Check(member.ptr())) {
-      return ConstantPythonValue::create(loc, m, member);
-    }
-  }
-  if (py::isinstance<py::module>(self) && py::isinstance<py::module>(member)) {
-    return std::make_shared<PythonValue>(member);
+  if (auto retval = toSugaredValue(member, m, loc, false, isBuiltinModule(), field)) {
+    return retval;
   }
   throw ErrorReport(loc) << "unsupported attribute lookup on " << py::repr(self) << ".";
 }
@@ -281,10 +247,11 @@ struct ModuleValue : public SugaredValue {
     py::object py_module = py::cast(module);
     if(py::object attr = py::getattr(py_module, field.c_str(), py::none())) {
       if(py::isinstance<py::function>(attr) ||
-         py::isinstance(attr, py::module::import("torch.nn").attr("Module"))) {
-        return std::make_shared<PythonValue>(attr);
-      } else if(py_module.attr("_constants_set").contains(field.c_str())) {
-        return ConstantPythonValue::create(loc, m, attr);
+         py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
+          py_module.attr("_constants_set").contains(field.c_str())) {
+        if (auto retval = toSugaredValue(attr, m, loc)) {
+          return retval;
+        }
       } else {
         throw ErrorReport(loc) << "attribute '" << field << "' of type '" << typeString(attr) << "' is not usable in a script method (did you forget to add it __constants__?)";
       }
@@ -304,12 +271,10 @@ struct ModuleValue : public SugaredValue {
     std::vector<std::shared_ptr<SugaredValue>> result;
     for(py::handle module : py_module) {
       py::object obj = py::reinterpret_borrow<py::object>(module);
-      if(py::isinstance<Module>(obj)) {
-        auto r = py::cast<std::shared_ptr<Module>>(obj);
-        result.push_back(std::make_shared<ModuleValue>(r));
-      } else {
-        result.push_back(ConstantPythonValue::create(loc, m, obj));
-      }
+      result.push_back(toSugaredValue(obj, m, loc, /*allow_default =*/true,
+                                      /*is_builtin_module =*/ false,
+                                      /*field_name =*/ "",
+                                      /*is_submodule =*/ true));
     }
     return result;
   }
@@ -317,6 +282,53 @@ struct ModuleValue : public SugaredValue {
  private:
   std::shared_ptr<Module> module;
 };
+
+std::shared_ptr<SugaredValue> toSugaredValue(py::object obj, Method &m, SourceRange loc, bool allow_default, bool is_builtin_module, const std::string& field_name, bool is_submodule) {
+  // directly create SimpleValues when possible, because they are first-class
+  // and can be re-assigned. Otherwise, this would be invalid:
+  // f = python_constant
+  // while ...
+  //   f = f + 1
+  auto& g = *m.graph();
+  if(py::isinstance<py::int_>(obj)) {
+    return toSimple(insertConstant(g, py::cast<int64_t>(obj), loc));
+  } else if(py::isinstance<py::float_>(obj)) {
+    return toSimple(insertConstant(g, py::cast<float>(obj), loc));
+  } else if(py::isinstance<py::bool_>(obj)) {
+    return toSimple(insertConstant(g, py::cast<bool>(obj), loc));
+  } else if(THPDevice_Check(obj.ptr())) {
+    auto device = (THPDevice*) obj.ptr();
+    std::vector<int64_t> v = {static_cast<int64_t>(device->device.type()), device->device.index()};
+    return toSimple(insertConstant(g, std::move(v)));
+  } else if(THPLayout_Check(obj.ptr())) {
+    auto layout = (THPLayout*) obj.ptr();
+    const auto v = static_cast<int64_t>(layout->layout);
+    return toSimple(insertConstant(g, v, loc));
+  } else if(THPDtype_Check(obj.ptr())) {
+    auto dtype = (THPDtype*)(obj.ptr());
+    const auto v = static_cast<int64_t>(dtype->scalar_type);
+    return toSimple(insertConstant(g, v, loc));
+  } else if (py::isinstance<Module>(obj)) {
+    auto mod = py::cast<std::shared_ptr<Module>>(obj);
+    // In the case that this Python object is not a submodule, inline *ONLY PURE*
+    // ScriptModules. This allows us to call arbitrary @script functions within
+    // a scripting context while still enforcing that parameters from
+    // stateful submodules are properly accounted for.
+    if (!is_submodule && mod->get_parameters().size() != 0) {
+      throw ErrorReport() << "Attempted to inline a Module with parameters. "
+        "Stateful modules to be inlined must be submodules of the callee.";
+    }
+    return std::make_shared<ModuleValue>(mod);
+  } else if (is_builtin_module && py::isinstance<py::function>(obj)) {
+    return std::make_shared<BuiltinFunction>(field_name, at::nullopt);
+  } else if (py::isinstance<py::module>(obj) || py::isinstance<py::function>(obj) || py::isinstance(obj, py::module::import("torch.nn").attr("Module"))) {
+    return std::make_shared<PythonValue>(obj);
+  }
+  if (allow_default)
+    return ConstantPythonValue::create(loc, m, obj);
+  else
+    return nullptr;
+}
 
 
 py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
@@ -352,23 +364,13 @@ py::object runMethodFromPython(Method& m, py::args args) {
 }
 
 Resolver pythonResolver(ResolutionCallback rcb) {
-  return [=](const std::string& name) -> std::shared_ptr<SugaredValue> {
+  return [=](const std::string& name, Method &m, const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
       AutoGIL ag;
       py::object obj = rcb(name);
       if(obj.is(py::none())) {
         return nullptr;
       }
-      // Inline *ONLY PURE* ScriptModules. This allows us to call arbitrary
-      // @script functions within a scripting context.
-      if (py::isinstance<Module>(obj)) {
-        auto mod = py::cast<std::shared_ptr<Module>>(obj);
-        if (mod->get_parameters().size() != 0) {
-          throw ErrorReport() << "Attempted to inline a Module with parameters. "
-            "Stateful modules to be inlined must be submodules of the callee.";
-        }
-        return std::make_shared<ModuleValue>(mod);
-      }
-      return std::make_shared<PythonValue>(obj);
+      return toSugaredValue(obj, m, loc);
   };
 }
 
