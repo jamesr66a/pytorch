@@ -45,6 +45,9 @@ inline std::shared_ptr<SugaredValue> toSimple(Value* v) {
   return std::make_shared<SimpleValue>(v);
 }
 
+// NB: This should be the single entry-point for instantiating a SugaredValue
+// from a Python object. If you are adding support for converting a new Python
+// type, *add it in this function's implementation*.
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Method& m,
