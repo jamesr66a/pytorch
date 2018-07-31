@@ -168,31 +168,38 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
   std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
       py::object member = getattr(loc, field);
       if (py::isinstance<py::module>(member)) {
-        return std::make_shared<PythonModuleValue>(member);
-      }
-      // We support calling functions and using type/layout/device constants
-      // on the torch builtin modules
-      if (isBuiltinModule()) {
-        if (py::isinstance<py::function>(member)) {
-          return std::make_shared<BuiltinFunction>(field, at::nullopt);
-        }
-        if(THPDtype_Check(member.ptr()) ||
-           THPLayout_Check(member.ptr()) ||
-           THPDevice_Check(member.ptr())) {
-            return toSugaredValue(member, m, loc);
-        }
+        return toSugaredValue(member, m, loc);
       }
       return std::make_shared<PythonValue>(member);
   }
  private:
-   bool isBuiltinModule() {
-     // XXX: these can't be static, or they will be destructed after the Python interpreter
-     // exits and that generally sounds like a bad idea
-     py::object torch = py::module::import("torch");
-     py::object functional = py::module::import("torch.nn.functional");
-     return self.is(torch) || self.is(functional);
-   }
 };
+
+struct VISIBILITY_HIDDEN BuiltinPythonModuleValue : public PythonModuleValue {
+  explicit BuiltinPythonModuleValue(py::object mod) : PythonModuleValue(mod) {}
+  std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
+    // We support calling functions and using type/layout/device constants
+    // on the torch builtin modules
+    py::object member = getattr(loc, field);
+    if (py::isinstance<py::function>(member)) {
+      return std::make_shared<BuiltinFunction>(field, at::nullopt);
+    }
+    if(THPDtype_Check(member.ptr()) ||
+       THPLayout_Check(member.ptr()) ||
+       THPDevice_Check(member.ptr())) {
+        return toSugaredValue(member, m, loc);
+    }
+    return this->PythonModuleValue::attr(loc, m, field);
+  }
+};
+
+bool isBuiltinModule(py::object obj) {
+  // XXX: these can't be static, or they will be destructed after the Python interpreter
+  // exits and that generally sounds like a bad idea
+  py::object torch = py::module::import("torch");
+  py::object functional = py::module::import("torch.nn.functional");
+  return obj.is(torch) || obj.is(functional);
+}
 
 // by using torch.jit.Const, a user can mark a python value constant
 // we then make that value immutable.
@@ -360,7 +367,11 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
     return std::make_shared<ModuleValue>(mod);
   } else if (py::isinstance<py::module>(obj)) {
-    return std::make_shared<PythonModuleValue>(obj);
+    if (isBuiltinModule(obj)) {
+      return std::make_shared<BuiltinPythonModuleValue>(obj);
+    } else {
+      return std::make_shared<PythonModuleValue>(obj);
+    }
   } else if (
       py::isinstance<py::function>(obj) ||
       py::isinstance(obj, py::module::import("torch.nn").attr("Module"))) {
