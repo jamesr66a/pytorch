@@ -189,8 +189,9 @@ struct Environment {
 
   SugaredValuePtr createCapturedInputIfNeeded(const SourceRange& loc, std::string ident) {
     auto in_frame = findInThisFrame(ident);
-    if (in_frame)
+    if (in_frame) {
       return in_frame;
+    }
 
     // recursively handles the case where parent blocks are also loops
     auto from_parent = next ? next->createCapturedInputIfNeeded(loc, ident) : nullptr;

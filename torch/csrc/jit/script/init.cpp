@@ -52,6 +52,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Method& m,
     SourceRange loc,
+    bool is_constant = false,
     bool is_submodule = false);
 
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
@@ -167,10 +168,7 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
 
   std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
       py::object member = getattr(loc, field);
-      if (py::isinstance<py::module>(member)) {
-        return toSugaredValue(member, m, loc);
-      }
-      return std::make_shared<PythonValue>(member);
+      return toSugaredValue(member, m, loc);
   }
  private:
 };
@@ -184,12 +182,7 @@ struct VISIBILITY_HIDDEN BuiltinPythonModuleValue : public PythonModuleValue {
     if (py::isinstance<py::function>(member)) {
       return std::make_shared<BuiltinFunction>(field, at::nullopt);
     }
-    if(THPDtype_Check(member.ptr()) ||
-       THPLayout_Check(member.ptr()) ||
-       THPDevice_Check(member.ptr())) {
-        return toSugaredValue(member, m, loc);
-    }
-    return this->PythonModuleValue::attr(loc, m, field);
+    return toSugaredValue(member, m, loc, /*is_constant =*/true);
   }
 };
 
@@ -201,30 +194,17 @@ bool isBuiltinModule(py::object obj) {
   return obj.is(torch) || obj.is(functional);
 }
 
-// by using torch.jit.Const, a user can mark a python value constant
-// we then make that value immutable.
-// once marked constant, we enable additional behavior such as
-// 1. conversion via asValue to a constant Tensor
-// 2. unrolling of for loops
-struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
-  using PythonValue::PythonValue;
-  virtual Value * asValue(SourceRange loc, Method & m) override {
-
-    return PythonValue::asValue(loc, m);
-  }
-  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
-    if(!py::isinstance<py::tuple>(self))
-      return PythonValue::asTuple(loc, m);
-
+struct VISIBILITY_HIDDEN PythonTupleValue : public PythonValue {
+  explicit PythonTupleValue(py::object tup) : PythonValue(tup) {}
+  std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
     py::tuple tup = self;
     std::vector<std::shared_ptr<SugaredValue>> result;
-    for(size_t i = 0; i < tup.size(); ++i) {
-      result.push_back(toSugaredValue(tup[i], m, loc));
+    result.reserve(tup.size());
+    for (size_t i = 0; i < tup.size(); ++i) {
+      // TODO is it safe to always assume tuple elements are constant?
+      result.push_back(toSugaredValue(tup[i], m, loc, true));
     }
     return result;
-  }
-  static std::shared_ptr<SugaredValue> create(SourceRange loc, Method& m, py::object self) {
-    return std::make_shared<ConstantPythonValue>(self);
   }
 };
 
@@ -289,7 +269,7 @@ struct ModuleValue : public SugaredValue {
       if (py::isinstance<py::function>(attr) ||
           py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
           py_module.attr("_constants_set").contains(field.c_str())) {
-        if (auto retval = toSugaredValue(attr, m, loc)) {
+        if (auto retval = toSugaredValue(attr, m, loc, /*is_constant=*/true)) {
           return retval;
         }
       } else {
@@ -315,6 +295,7 @@ struct ModuleValue : public SugaredValue {
           obj,
           m,
           loc,
+          /*is_constant =*/false,
           /*is_submodule =*/true));
     }
     return result;
@@ -328,6 +309,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Method& m,
     SourceRange loc,
+    bool is_constant,
     bool is_submodule) {
   // directly create SimpleValues when possible, because they are first-class
   // and can be re-assigned. Otherwise, this would be invalid:
@@ -335,26 +317,29 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   // while ...
   //   f = f + 1
   auto& g = *m.graph();
-  if (py::isinstance<py::int_>(obj)) {
-    return toSimple(insertConstant(g, py::cast<int64_t>(obj), loc));
-  } else if (py::isinstance<py::float_>(obj)) {
-    return toSimple(insertConstant(g, py::cast<float>(obj), loc));
-  } else if (py::isinstance<py::bool_>(obj)) {
-    return toSimple(insertConstant(g, py::cast<bool>(obj), loc));
-  } else if (THPDevice_Check(obj.ptr())) {
-    auto device = (THPDevice*)obj.ptr();
-    std::vector<int64_t> v = {static_cast<int64_t>(device->device.type()),
-                              device->device.index()};
-    return toSimple(insertConstant(g, std::move(v)));
-  } else if (THPLayout_Check(obj.ptr())) {
-    auto layout = (THPLayout*)obj.ptr();
-    const auto v = static_cast<int64_t>(layout->layout);
-    return toSimple(insertConstant(g, v, loc));
-  } else if (THPDtype_Check(obj.ptr())) {
-    auto dtype = (THPDtype*)(obj.ptr());
-    const auto v = static_cast<int64_t>(dtype->scalar_type);
-    return toSimple(insertConstant(g, v, loc));
-  } else if (py::isinstance<Module>(obj)) {
+  if (is_constant) {
+    if (py::isinstance<py::int_>(obj)) {
+      return toSimple(insertConstant(g, py::cast<int64_t>(obj), loc));
+    } else if (py::isinstance<py::float_>(obj)) {
+      return toSimple(insertConstant(g, py::cast<float>(obj), loc));
+    } else if (py::isinstance<py::bool_>(obj)) {
+      return toSimple(insertConstant(g, py::cast<bool>(obj), loc));
+    } else if (THPDevice_Check(obj.ptr())) {
+      auto device = (THPDevice*)obj.ptr();
+      std::vector<int64_t> v = {static_cast<int64_t>(device->device.type()),
+                                device->device.index()};
+      return toSimple(insertConstant(g, std::move(v)));
+    } else if (THPLayout_Check(obj.ptr())) {
+      auto layout = (THPLayout*)obj.ptr();
+      const auto v = static_cast<int64_t>(layout->layout);
+      return toSimple(insertConstant(g, v, loc));
+    } else if (THPDtype_Check(obj.ptr())) {
+      auto dtype = (THPDtype*)(obj.ptr());
+      const auto v = static_cast<int64_t>(dtype->scalar_type);
+      return toSimple(insertConstant(g, v, loc));
+    }
+  }
+  if (py::isinstance<Module>(obj)) {
     auto mod = py::cast<std::shared_ptr<Module>>(obj);
     // In the case that this Python object is not a submodule, inline *ONLY
     // PURE* ScriptModules. This allows us to call arbitrary @script functions
@@ -372,12 +357,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     } else {
       return std::make_shared<PythonModuleValue>(obj);
     }
-  } else if (
-      py::isinstance<py::function>(obj) ||
-      py::isinstance(obj, py::module::import("torch.nn").attr("Module"))) {
-    return std::make_shared<PythonValue>(obj);
+  } else if (py::isinstance<py::tuple>(obj)) {
+    return std::make_shared<PythonTupleValue>(obj);
   }
-  return ConstantPythonValue::create(loc, m, obj);
+  return std::make_shared<PythonValue>(obj);
 }
 
 py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
