@@ -213,11 +213,8 @@ std::shared_ptr<SugaredValue> PythonValue::attr(SourceRange loc, Method & m, con
   // make an exception for traversing modules because we want to be access
   // torch, torch.nn.functional, and the functions they expose.
   py::object member = getattr(loc, field);
-  if (auto retval =
-          toSugaredValue(member, m, loc)) {
-    return retval;
-  }
-  throw ErrorReport(loc) << "unsupported attribute lookup on " << py::repr(self) << ".";
+
+  return toSugaredValue(member, m, loc);
 }
 
 // defines how modules/methods behave inside the script subset.
@@ -269,9 +266,7 @@ struct ModuleValue : public SugaredValue {
       if (py::isinstance<py::function>(attr) ||
           py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
           py_module.attr("_constants_set").contains(field.c_str())) {
-        if (auto retval = toSugaredValue(attr, m, loc, /*is_constant=*/true)) {
-          return retval;
-        }
+        return toSugaredValue(attr, m, loc, true);
       } else {
         throw ErrorReport(loc) << "attribute '" << field << "' of type '" << typeString(attr) << "' is not usable in a script method (did you forget to add it __constants__?)";
       }
