@@ -194,14 +194,13 @@ bool isBuiltinModule(py::object obj) {
   return obj.is(torch) || obj.is(functional);
 }
 
-struct VISIBILITY_HIDDEN PythonTupleValue : public PythonValue {
-  explicit PythonTupleValue(py::object tup) : PythonValue(tup) {}
+struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
+  explicit ConstantPythonTupleValue(py::object tup) : PythonValue(tup) {}
   std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
     py::tuple tup = self;
     std::vector<std::shared_ptr<SugaredValue>> result;
     result.reserve(tup.size());
     for (size_t i = 0; i < tup.size(); ++i) {
-      // TODO is it safe to always assume tuple elements are constant?
       result.push_back(toSugaredValue(tup[i], m, loc, true));
     }
     return result;
@@ -332,6 +331,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       auto dtype = (THPDtype*)(obj.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
       return toSimple(insertConstant(g, v, loc));
+    } else if (py::isinstance<py::tuple>(obj)) {
+     return std::make_shared<ConstantPythonTupleValue>(obj);
     }
   }
   if (py::isinstance<Module>(obj)) {
@@ -352,8 +353,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     } else {
       return std::make_shared<PythonModuleValue>(obj);
     }
-  } else if (py::isinstance<py::tuple>(obj)) {
-    return std::make_shared<PythonTupleValue>(obj);
   }
   return std::make_shared<PythonValue>(obj);
 }
