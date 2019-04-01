@@ -1508,6 +1508,44 @@ class TestJit(JitTestCase):
         self.assertEqual(len(list(trace.graph().inputs())), 2)
         FileCheck().check("mul").check("add").run(str(trace))
 
+    @enable_cpu_fuser
+    def test_batchnorm_fuser(self):
+        class BNTest(torch.jit.ScriptModule):
+            def __init__(self):
+                super(BNTest, self).__init__()
+                self.bn = torch.nn.BatchNorm1d(2048).float()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.relu(self.bn(x))
+
+        bn = BNTest().eval()
+        with torch.no_grad():
+            input = torch.randn(20, 2048).float()
+            bn(input)
+            print(bn.graph_for(input))
+
+            torch.testing.assert_allclose(bn(input), torch.relu(bn.bn(input)))
+
+    @enable_cpu_fuser
+    def test_batchnorm_fuser_double(self):
+        class BNTest(torch.jit.ScriptModule):
+            def __init__(self):
+                super(BNTest, self).__init__()
+                self.bn = torch.nn.BatchNorm1d(2048).float()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.relu(self.bn(x))
+
+        bn = BNTest().eval()
+        with torch.no_grad():
+            input = torch.randn(20, 2048).float()
+            bn(input)
+            print(bn.graph_for(input))
+
+            torch.testing.assert_allclose(bn(input), torch.relu(bn.bn(input)))
+
     def test_trace_c10_ops(self):
         class MyModel(torch.nn.Module):
             def __init__(self):

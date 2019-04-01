@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/ir.h>
 
 #include <torch/csrc/jit/fuser/cpu/resource_strings.h>
+#include <torch/csrc/jit/fuser/cpu/vec256_resource_strings.h>
 #include <torch/csrc/jit/fuser/cuda/resource_strings.h>
 
 #include <cmath>
@@ -479,6 +480,7 @@ std::string generateKernel(
     code_string = cuda::cuda_compilation_unit_template.format(env);
   } else {
     env.s("type_declarations", cpu::type_declarations_template.format(env));
+    env.s("vec256_header", cpu::vec256_template.format(env));
     code_string = cpu::cpu_compilation_unit_template.format(env);
   }
 
