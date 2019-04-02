@@ -202,6 +202,41 @@ class ShapePropagator {
     return tensor_types;
   }
 
+  template <typename T>
+  size_t findPromotedScalarType(const std::vector<std::shared_ptr<T>>& types) {
+    auto precedence_lookup = [](at::ScalarType type) {
+      switch (type) {
+        case at::kBool:
+        case at::kByte:
+        case at::kChar:
+          return 1;
+        case at::kShort:
+          return 2;
+        case at::kInt:
+          return 4;
+        case at::kFloat:
+          return 6;
+        case at::kLong:
+          return 8;
+        case at::kDouble:
+          return 10;
+      }
+      throw std::runtime_error("Unknown scalar type");
+    };
+
+    AT_ASSERT(types.size() >= 1);
+    size_t promoted_idx = 0;
+    int curr_precedence = precedence_lookup(types[promoted_idx]->scalarType());
+    for (size_t i = 1; i < types.size(); ++i) {
+      auto precedence = precedence_lookup(types[i]->scalarType());
+      if (precedence > curr_precedence) {
+        promoted_idx = i;
+        curr_precedence = precedence;
+      }
+    }
+    return promoted_idx;
+  }
+
   bool mergeTypes(
       ArrayRef<Value*> lhs,
       ArrayRef<Value*> rhs,
@@ -791,7 +826,8 @@ class ShapePropagator {
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<DimensionedTensorType>(node)) {
-            return {broadcast(*maybe_tensor_types, 0)};
+            size_t arg_for_type = findPromotedScalarType(*maybe_tensor_types);
+            return {broadcast(*maybe_tensor_types, arg_for_type)};
           }
           return {};
         }};

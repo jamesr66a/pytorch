@@ -4420,7 +4420,6 @@ class TestJit(TestCase):
 
     def test_cdf(self):
         for Dist, keys, values, sample in self._examples():
-
             def f(sample, *values):
                 param = dict(zip(keys, values))
                 dist = Dist(**param)

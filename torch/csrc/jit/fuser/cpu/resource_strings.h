@@ -36,8 +36,8 @@ static auto cpu_compilation_unit_template = CodeTemplate(R"(
 #include <cstdint>
 
 template <typename scalar_t>
-scalar_t rsqrtf(scalar_t x) {
-  return 1.0/sqrtf(x);
+scalar_t rsqrt(scalar_t x) {
+  return static_cast<decltype(x)>(1.0)/sqrt(x);
 }
 
 ${type_declarations}
