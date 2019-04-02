@@ -67,7 +67,7 @@ static CompilerConfig& getConfig() {
 static const std::string compile_string =
     "\"${cxx}\" -O3 -g "
 #ifndef __PPC64__
-//  "-march=native "
+  "-march=native "
 #endif
     "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 
@@ -91,7 +91,7 @@ static void runCompiler(
   AT_CHECK(r == 0, "Failed to compile a fused CPU kernel");
 }
 
-static const std::string disas_string = "objdump -M  intel -d \"${so_file}\"";
+static const std::string disas_string = "/usr/local/opt/binutils/bin/objdump -M  intel -d \"${so_file}\"";
 static void disas(const std::string& so_file) {
   TemplateEnv env;
   env.s("so_file", so_file);

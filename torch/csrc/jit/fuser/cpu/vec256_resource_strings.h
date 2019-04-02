@@ -38,7 +38,7 @@ struct Vec256 {
 private:
   T values[32 / sizeof(T)] = {0};
 public:
-  constexpr int size() {
+  constexpr int size() const {
     return 32 / sizeof(T);
   }
   Vec256() {}

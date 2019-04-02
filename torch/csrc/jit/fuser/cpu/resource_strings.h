@@ -46,8 +46,18 @@ ${type_declarations}
 
 #define OMP_THRESHOLD 100000
 static void ${kernelName}_kernel(IndexType totalElements, ${formals}) {
-  #pragma omp parallel for if(totalElements > OMP_THRESHOLD)
-  for (IndexType linearIndex = 0;
+  IndexType linearIndex = 0;
+  if (/*vectorizable=*/${vectorizable}) {
+    for (;
+          linearIndex < totalElements;
+          linearIndex += ${vectorWidth}) {
+        // Convert `linearIndex` into an offset of tensor:
+        ${tensorOffsets}
+        // calculate the results
+        ${kernelVectorBody}
+    }
+  }
+  for (;
         linearIndex < totalElements;
         linearIndex += 1) {
       // Convert `linearIndex` into an offset of tensor:
