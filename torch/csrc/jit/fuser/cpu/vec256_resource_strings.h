@@ -157,6 +157,13 @@ public:
     }
     return ret;
   }
+  Vec256<T> where(const Vec256<T> &x, const Vec256<T> &y) {
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = values[i] ? x[i] : y[i];
+    }
+    return ret;
+  }
   #define DEFINE_COMP(binary_pred)                                              \
     Vec256<T> operator binary_pred(const Vec256<T> &other) const {              \
       Vec256<T> vec;                                                            \
@@ -418,6 +425,9 @@ public:
   Vec256<float> pow(const Vec256<float> &b) const {
     return Vec256<float>(Sleef_powf8_u10(values, b));
   }
+  Vec256<float> where(const Vec256<float> &x, const Vec256<float> &y) {
+    return _mm256_or_ps(_mm256_and_ps(x.values, values), _mm256_andnot_ps(values, y.values));
+  }
 };
 
 template <>
@@ -525,6 +535,9 @@ struct Vec256<int32_t> : public Vec256i {
   }
   Vec256<float> to_float() const {
     return Vec256<float>(_mm256_cvtepi32_ps(values));
+  }
+  Vec256<int32_t> where(const Vec256<int32_t> &x, const Vec256<int32_t> &y) {
+    return _mm256_or_si256(_mm256_and_si256(x.values, values), _mm256_andnot_si256(values, y.values));
   }
 };
 

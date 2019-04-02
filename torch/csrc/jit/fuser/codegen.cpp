@@ -199,8 +199,7 @@ static std::string encodeVectorRHS(const Node* n) {
       {aten::abs, "${0}.abs()"},
       {aten::sigmoid, "Vec256<float>(1) / (Vec256<float>(1) + ${0}.neg().exp())"},
       {aten::relu, "maximum(${0}, Vec256<float>(0))"},
-      // {aten::threshold,
-      //  "${0} <= ${1} ? static_cast<decltype(${0})>(${2}) : ${0} "},
+      {aten::threshold, "(${0} <= ${1}).where(${2}, ${0})"},
       {aten::log, "${0}.log()"},
       {aten::log10, "${0}.log10()"},
       {aten::log1p, "${0}.log1p()"},
@@ -264,7 +263,7 @@ static std::string encodeVectorRHS(const Node* n) {
       // {aten::rand_like, "uniform(rnd())"},
 
       // where
-      // {aten::where, "(${0} ? ${1} : ${2})"},
+      {aten::where, "(${0} ? ${1} : ${2})"},
 
       // simple derivatives
       {aten::_sigmoid_backward, "${0} * ${1} * (Vec256<float>(1.f) - ${1})"},
