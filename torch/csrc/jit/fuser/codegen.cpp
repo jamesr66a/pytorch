@@ -102,7 +102,11 @@ static std::string variableType(const std::shared_ptr<c10::Type>& t) {
 }
 
 static std::string vectorVariableType(const std::shared_ptr<c10::Type>& t) {
-  return "Vec256<" + variableType(t) + ">";
+  auto scalar_type_str = variableType(t);
+  if (scalar_type_str == "int") {
+    scalar_type_str = "int32_t";
+  }
+  return "Vec256<" + scalar_type_str + ">";
 }
 
 static std::string typeCastedValueName(
