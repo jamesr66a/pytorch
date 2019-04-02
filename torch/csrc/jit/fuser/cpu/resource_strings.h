@@ -37,6 +37,8 @@ static auto cpu_compilation_unit_template = CodeTemplate(R"(
 #include <cstring>
 #include <cmath>
 
+#include <cstdio>
+
 ${vec256_header}
 
 template <typename scalar_t>
@@ -49,16 +51,16 @@ ${type_declarations}
 #define OMP_THRESHOLD 100000
 static void ${kernelName}_kernel(IndexType totalElements, ${formals}) {
   IndexType linearIndex = 0;
-  if (/*vectorizable=*/${vectorizable}) {
-    for (;
-          linearIndex < totalElements;
-          linearIndex += ${vectorWidth}) {
-        // Convert `linearIndex` into an offset of tensor:
-        ${tensorOffsets}
-        // calculate the results
-        ${kernelVectorBody}
-    }
+#if ${vectorizable} // vectorizable
+  for (;
+        linearIndex + ${vectorWidth} < totalElements;
+        linearIndex += ${vectorWidth}) {
+      // Convert `linearIndex` into an offset of tensor:
+      ${tensorOffsets}
+      // calculate the results
+      ${kernelVectorBody}
   }
+#endif // vectorizable
   for (;
         linearIndex < totalElements;
         linearIndex += 1) {

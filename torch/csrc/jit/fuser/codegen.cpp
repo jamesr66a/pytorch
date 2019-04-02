@@ -137,31 +137,25 @@ static std::string typeCastedValueName(
 
 static std::string typeCastedVectorValueName(
     const std::shared_ptr<c10::Type>& t,
-    const std::shared_ptr<c10::Type>& outtype,
+    const at::ScalarType outtype,
     const std::string& vn) {
-  auto out_scalar_type = outtype->expect<c10::DimensionedTensorType const>()
-                                 ->scalarType();
   if (t->kind() == TypeKind::IntType || t->kind() == TypeKind::BoolType) {
-    if (!isIntegralType(out_scalar_type)) {
+    if (!isIntegralType(outtype)) {
       return std::string("(") + vn + ".to_float())";
     }
     return vn;
   } else if (t->kind() == TypeKind::FloatType) {
-    if (!isFloatingType(out_scalar_type)) {
-      // TODO: make pass over graph and set vectorizable false if we have this case
-      throw std::runtime_error("Unsupported vector cast");
+    if (!isFloatingType(outtype)) {
+      return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
     return vn;
   } else if (t->kind() == TypeKind::DimensionedTensorType) {
     auto const tt = t->cast<DimensionedTensorType>();
-    auto scalar_type = tt->scalarType();
-    if (scalar_type == at::kFloat && out_scalar_type == at::kFloat) {
-      return vn;
-    } else if (scalar_type == at::kInt && out_scalar_type == at::kFloat) {
+    if (tt->scalarType() != outtype) {
       return std::string("(") + vn + ".to_float())";
     }
+    return vn;
   }
-
   // something went wrong with the type analysis during shape propagation
   throw std::runtime_error(
       "unknown scalar type during JIT fusion code generation");
@@ -258,7 +252,7 @@ static std::string encodeVectorRHS(const Node* n) {
       {aten::le, "(${0} <= ${1})"},
       {aten::lt, "${0} < ${1}"},
       {aten::lerp, "${cast_0} + ${cast_2} * (${cast_1} - ${cast_0})"},
-      // {aten::type_as, "(${cast_0})"},
+      {aten::type_as, "(${cast_0})"}, // TODO: confirm this is correct
       {aten::mul, "${cast_0} * ${cast_1}"},
       {aten::ne, "${0} != ${1}"},
       // {aten::remainder, "remainderf(${0}, ${1})"},
@@ -307,7 +301,7 @@ static std::string encodeVectorRHS(const Node* n) {
       env.s(std::to_string(i), valueName(in));
       env.s(
           std::string("cast_") + std::to_string(i),
-          typeCastedVectorValueName(in->type(), n->output()->type(), valueName(in)));
+          typeCastedVectorValueName(in->type(), outtype, valueName(in)));
       i++;
     }
 
