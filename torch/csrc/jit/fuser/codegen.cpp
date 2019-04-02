@@ -135,6 +135,38 @@ static std::string typeCastedValueName(
       "unknown scalar type during JIT fusion code generation");
 }
 
+static std::string typeCastedVectorValueName(
+    const std::shared_ptr<c10::Type>& t,
+    const std::shared_ptr<c10::Type>& outtype,
+    const std::string& vn) {
+  auto out_scalar_type = outtype->expect<c10::DimensionedTensorType const>()
+                                 ->scalarType();
+  if (t->kind() == TypeKind::IntType || t->kind() == TypeKind::BoolType) {
+    if (!isIntegralType(out_scalar_type)) {
+      return std::string("(") + vn + ".to_float())";
+    }
+    return vn;
+  } else if (t->kind() == TypeKind::FloatType) {
+    if (!isFloatingType(out_scalar_type)) {
+      // TODO: make pass over graph and set vectorizable false if we have this case
+      throw std::runtime_error("Unsupported vector cast");
+    }
+    return vn;
+  } else if (t->kind() == TypeKind::DimensionedTensorType) {
+    auto const tt = t->cast<DimensionedTensorType>();
+    auto scalar_type = tt->scalarType();
+    if (scalar_type == at::kFloat && out_scalar_type == at::kFloat) {
+      return vn;
+    } else if (scalar_type == at::kInt && out_scalar_type == at::kFloat) {
+      return std::string("(") + vn + ".to_float())";
+    }
+  }
+
+  // something went wrong with the type analysis during shape propagation
+  throw std::runtime_error(
+      "unknown scalar type during JIT fusion code generation");
+}
+
 // Writes RHS of special handling "simple mappable" ops
 static std::string encodeSpecialRHS(const Node* n, TemplateEnv& env) {
   // special case for clamp fusion on missing min/max inputs
@@ -166,83 +198,83 @@ static std::string encodeSpecialRHS(const Node* n, TemplateEnv& env) {
 }
 
 // Writes "simple mappable" ops
-static std::string encodeRHS(const Node* n) {
+static std::string encodeVectorRHS(const Node* n) {
   static std::unordered_map<NodeKind, std::string> simple_map_ops = {
       // unary
-      {aten::_cast_Float, "static_cast<float>(${0})"},
-      {aten::abs, "fabs(${0})"},
-      {aten::sigmoid, "1.f / (1.f + expf(-${0}))"},
-      {aten::relu, "${0} < 0 ? 0.f : ${0} "},
-      {aten::threshold,
-       "${0} <= ${1} ? static_cast<decltype(${0})>(${2}) : ${0} "},
-      {aten::log, "logf(${0})"},
-      {aten::log10, "log10f(${0})"},
-      {aten::log1p, "log1pf(${0})"},
-      {aten::log2, "log2f(${0})"},
-      {aten::lgamma, "lgammaf(${0})"},
-      {aten::exp, "expf(${0})"},
-      {aten::expm1, "expm1f(${0})"},
-      {aten::erf, "erff(${0})"},
-      {aten::erfc, "erfcf(${0})"},
-      {aten::cos, "cosf(${0})"},
-      {aten::acos, "acosf(${0})"},
-      {aten::cosh, "coshf(${0})"},
-      {aten::sin, "sinf(${0})"},
-      {aten::asin, "asinf(${0})"},
-      {aten::sinh, "sinhf(${0})"},
-      {aten::tan, "tanf(${0})"},
-      {aten::atan, "atanf(${0})"},
-      {aten::tanh, "tanhf(${0})"},
-      {aten::sqrt, "sqrtf(${0})"},
-      {aten::rsqrt, "rsqrtf(${0})"},
-      {aten::ceil, "ceilf(${0})"},
-      {aten::floor, "floorf(${0})"},
-      {aten::round, "roundf(${0})"},
-      {aten::trunc, "truncf(${0})"},
-      {aten::frac, "fracf(${0})"},
-      {aten::reciprocal, "1.f/(${0})"},
-      {aten::neg, "-${0}"},
+      // {aten::_cast_Float, "static_cast<float>(${0})"},
+      {aten::abs, "${0}.abs()"},
+      {aten::sigmoid, "Vec256<float>(1) / (Vec256<float>(1) + ${0}.neg().exp())"},
+      {aten::relu, "maximum(${0}, Vec256<float>(0))"},
+      // {aten::threshold,
+      //  "${0} <= ${1} ? static_cast<decltype(${0})>(${2}) : ${0} "},
+      {aten::log, "${0}.log()"},
+      {aten::log10, "${0}.log10()"},
+      {aten::log1p, "${0}.log1p()"},
+      {aten::log2, "${0}.log2()"},
+      // {aten::lgamma, "lgammaf(${0})"},
+      {aten::exp, "${0}.exp()"},
+      {aten::expm1, "${0}.expm1()"},
+      {aten::erf, "${0}.erf()"},
+      {aten::erfc, "${0}.erfc()"},
+      {aten::cos, "${0}.cos()"},
+      {aten::acos, "${0}.acos()"},
+      {aten::cosh, "${0}.cosh()"},
+      {aten::sin, "${0}.sin()"},
+      {aten::asin, "${0}.asin()"},
+      {aten::sinh, "${0}.sinh()"},
+      {aten::tan, "${0}.tan()"},
+      {aten::atan, "${0}.atan()"},
+      {aten::tanh, "${0}.tanh()"},
+      {aten::sqrt, "${0}.sqrt()"},
+      {aten::rsqrt, "${0}.rsqrt()"},
+      {aten::ceil, "${0}.ceil()"},
+      {aten::floor, "${0}.floor()"},
+      {aten::round, "${0}.round()"},
+      {aten::trunc, "${0}.trunc()"},
+      // {aten::frac, "fracf(${0})"},
+      {aten::reciprocal, "${0}.reciprocal()"},
+      {aten::neg, "${0}.neg()"},
       // simple binary
-      {aten::atan2, "atan2(${0}, ${1})"},
-      {aten::min, "fminf(${0}, ${1})"},
-      {aten::max, "fmaxf(${0}, ${1})"},
+      // {aten::atan2, "atan2(${0}, ${1})"},
+      {aten::min, "minimum(${0}, ${1})"},
+      {aten::max, "maximum(${0}, ${1})"},
 
       // binary with other
       // TODO: some of these ops will not get generated because
       // we only work on float inputs/outputs, but they are here to record
       // that they are valid mappable ops once we handle more type
 
-      {aten::__and__, "${0} && ${1}"},
-      {aten::__lshift__, "${0} << ${1}"},
+      // {aten::__and__, "${0} && ${1}"},
+      // {aten::__lshift__, "${0} << ${1}"},
       {aten::__or__, "${0} || ${1}"},
-      {aten::__rshift__, "${0} >> ${1}"},
+      // {aten::__rshift__, "${0} >> ${1}"},
       {aten::__xor__, "${0} ^ ${1}"},
       {aten::addcmul, "${cast_0} + ${cast_3} * ${cast_1} * ${cast_2}"},
       {aten::div, "${cast_0} / ${cast_1}"},
       {aten::eq, "${0} == ${1}"},
-      {aten::fmod, "fmodf(${cast_0}, ${cast_1})"},
+      // {aten::fmod, "fmodf(${cast_0}, ${cast_1})"},
       {aten::ge, "(${0} >= ${1})"},
       {aten::gt, "${0} > ${1}"},
       {aten::le, "(${0} <= ${1})"},
       {aten::lt, "${0} < ${1}"},
       {aten::lerp, "${cast_0} + ${cast_2} * (${cast_1} - ${cast_0})"},
-      {aten::type_as, "(${cast_0})"},
+      // {aten::type_as, "(${cast_0})"},
       {aten::mul, "${cast_0} * ${cast_1}"},
       {aten::ne, "${0} != ${1}"},
-      {aten::remainder, "remainderf(${0}, ${1})"},
-      {aten::pow, "powf(${cast_0}, ${cast_1})"},
+      // {aten::remainder, "remainderf(${0}, ${1})"},
+      {aten::pow, "${cast_0}.pow(${cast_1})"},
 
       // alpha
       {aten::add, "${cast_0} + ${cast_2}*${cast_1}"},
       {aten::sub, "(${cast_0} - ${cast_2}*${cast_1})"},
-      {aten::rand_like, "uniform(rnd())"},
+      // {aten::rand_like, "uniform(rnd())"},
 
       // where
-      {aten::where, "(${0} ? ${1} : ${2})"},
+      // {aten::where, "(${0} ? ${1} : ${2})"},
 
       // simple derivatives
-      {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
-      {aten::_tanh_backward, "${0} * (1.f - ${1} * ${1})"},
+      {aten::_sigmoid_backward, "${0} * ${1} * (Vec256<float>(1.f) - ${1})"},
+      {aten::_tanh_backward, "${0} * (Vec256<float>(1.f) - ${1} * ${1})"},
   };
 
   if (n->kind() == prim::Constant) {
@@ -260,6 +292,7 @@ static std::string encodeRHS(const Node* n) {
   TemplateEnv env;
 
   if (simple_map_ops.find(n->kind()) == simple_map_ops.end()) {
+    // TODO
     return encodeSpecialRHS(n, env);
   } else {
     size_t i = 0;
@@ -274,7 +307,7 @@ static std::string encodeRHS(const Node* n) {
       env.s(std::to_string(i), valueName(in));
       env.s(
           std::string("cast_") + std::to_string(i),
-          typeCastedValueName(in->type(), outtype, valueName(in)));
+          typeCastedVectorValueName(in->type(), n->output()->type(), valueName(in)));
       i++;
     }
 
@@ -284,7 +317,7 @@ static std::string encodeRHS(const Node* n) {
 }
 
 // Writes "simple mappable" ops
-static std::string encodeVectorRHS(const Node* n) {
+static std::string encodeRHS(const Node* n) {
   static std::unordered_map<NodeKind, std::string> simple_map_ops = {
       // unary
       {aten::_cast_Float, "static_cast<float>(${0})"},

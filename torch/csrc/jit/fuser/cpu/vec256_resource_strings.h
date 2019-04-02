@@ -8,6 +8,7 @@ namespace fuser {
 namespace cpu {
 
 static auto vec256_template = CodeTemplate(R"(
+
 // ********** Vec256 **********
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
@@ -60,6 +61,121 @@ public:
   void store(void* ptr, int count = size()) const {
     std::memcpy(ptr, values, count * sizeof(T));
   }
+  Vec256<T> map(T (*f)(T)) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i != size(); i++) {
+      ret[i] = f(values[i]);
+    }
+    return ret;
+  }
+  Vec256<T> abs() const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = values[i] < 0 ? -values[i] : values[i];
+    }
+    return ret;
+  }
+  Vec256<T> neg() const {
+    return map([](T x) { return -x; });
+  }
+  Vec256<T> log() const {
+    return map(std::log);
+  }
+  Vec256<T> log10() const {
+    return map(std::log10);
+  }
+  Vec256<T> log1p() const {
+    return map(std::log1p);
+  }
+  Vec256<T> log2() const {
+    return map(std::log2);
+  }
+  Vec256<T> exp() const {
+    return map(std::exp);
+  }
+  Vec256<T> expm1() const {
+    return map(std::expm1);
+  }
+  Vec256<T> erf() const {
+    return map(std::erf);
+  }
+  Vec256<T> erfc() const {
+    return map(std::erfc);
+  }
+  Vec256<T> cos() const {
+    return map(std::cos);
+  }
+  Vec256<T> acos() const {
+    return map(std::acos);
+  }
+  Vec256<T> cosh() const {
+    return map(std::cosh);
+  }
+  Vec256<T> sin() const {
+    return map(std::sin);
+  }
+  Vec256<T> asin() const {
+    return map(std::asin);
+  }
+  Vec256<T> sinh() const {
+    return map(std::sinh);
+  }
+  Vec256<T> tan() const {
+    return map(std::tan);
+  }
+  Vec256<T> atan() const {
+    return map(std::atan);
+  }
+  Vec256<T> tanh() const {
+    return map(std::tanh);
+  }
+  Vec256<T> sqrt() const {
+    return map(std::sqrt);
+  }
+  Vec256<T> rsqrt() const {
+    return map([](T x) { return 1 / std::sqrt(x); });
+  }
+  Vec256<T> ceil() const {
+    return map(std::ceil);
+  }
+  Vec256<T> floor() const {
+    return map(std::floor);
+  }
+  Vec256<T> round() const {
+    return map(std::nearbyint);
+  }
+  Vec256<T> trunc() const {
+    return map(std::trunc);
+  }
+  Vec256<T> reciprocal() const {
+    return map([](T x) { return (T)(1) / x; });
+  }
+  Vec256<T> pow(const Vec256<T> &exp) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = std::pow(values[i], exp[i]);
+    }
+    return ret;
+  }
+  #define DEFINE_COMP(binary_pred)                                              \
+    Vec256<T> operator binary_pred(const Vec256<T> &other) const {              \
+      Vec256<T> vec;                                                            \
+      for (int64_t i = 0; i != size(); i++) {                                   \
+        if (values[i] binary_pred other.values[i]) {                            \
+          std::memset(static_cast<void*>(vec.values + i), 0xFF, sizeof(T));     \
+        } else {                                                                \
+          std::memset(static_cast<void*>(vec.values + i), 0, sizeof(T));        \
+        }                                                                       \
+      }                                                                         \
+      return vec;                                                               \
+    }
+    DEFINE_COMP(==)
+    DEFINE_COMP(!=)
+    DEFINE_COMP(>=)
+    DEFINE_COMP(<=)
+    DEFINE_COMP(>)
+    DEFINE_COMP(<)
+  #undef DEFINE_COMP
 };
 
 template <class T> Vec256<T> inline operator+(const Vec256<T> &a, const Vec256<T> &b) {
@@ -70,10 +186,84 @@ template <class T> Vec256<T> inline operator+(const Vec256<T> &a, const Vec256<T
   return c;
 }
 
+template <class T> Vec256<T> inline operator*(const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = a[i] * b[i];
+  }
+  return c;
+}
+
+template <class T> Vec256<T> inline operator/(const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = a[i] / b[i];
+  }
+  return c;
+}
+
+template <class T> Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = (a[i] > b[i]) ? a[i] : b[i];
+    if (_isnan(a[i])) {
+      // If either input is NaN, propagate a NaN.
+      // NOTE: The case where b[i] was NaN is handled correctly by the naive
+      // ternary operator above.
+      c[i] = a[i];
+    }
+  }
+  return c;
+}
+
+// Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
+// either input is a NaN.
+template <class T> Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = (a[i] < b[i]) ? a[i] : b[i];
+    if (_isnan(a[i])) {
+      // If either input is NaN, propagate a NaN.
+      // NOTE: The case where b[i] was NaN is handled correctly by the naive
+      // ternary operator above.
+      c[i] = a[i];
+    }
+  }
+  return c;
+}
+
+template <class T> Vec256<T> inline operator||(
+    const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = a[i] || b[i];
+  }
+  return c;
+}
+
+#define DEFINE_BITWISE_OP(op)                                               \
+template <class T>                                                          \
+Vec256<T> inline operator op(const Vec256<T> &a, const Vec256<T> &b) {      \
+  using iT = int_same_size_t<T>;                                            \
+  iT buffer[Vec256<T>::size()];                                             \
+  for (int64_t i = 0; i != Vec256<T>::size(); i++) {                        \
+    auto a_val = a[i];                                                      \
+    auto b_val = b[i];                                                      \
+    iT *i_a_ptr = reinterpret_cast<iT*>(&a_val);                            \
+    iT *i_b_ptr = reinterpret_cast<iT*>(&b_val);                            \
+    buffer[i] = *i_a_ptr op *i_b_ptr;                                       \
+  }                                                                         \
+  return Vec256<T>::loadu(buffer);                                          \
+}
+DEFINE_BITWISE_OP(^)
+#undef DEFINE_BITWISE_OP
+
 
 // ********** Vec256<float> **********
 #if defined(__AVX__) && !defined(_MSC_VER)
 
+// TODO: DOES THIS WORK LOL
+#include <sleef.h>
 #include <x86intrin.h>
 
 template <> class Vec256<float> {
@@ -112,11 +302,157 @@ public:
       std::memcpy(ptr, tmp_values, count * sizeof(float));
     }
   }
+  Vec256<float> map(float (*f)(float)) const {
+    __at_align32__ float tmp[8];
+    store(tmp);
+    for (int64_t i = 0; i < 8; i++) {
+      tmp[i] = f(tmp[i]);
+    }
+    return loadu(tmp);
+  }
+  Vec256<float> abs() const {
+    auto mask = _mm256_set1_ps(-0.f);
+    return _mm256_andnot_ps(mask, values);
+  }
+  Vec256<float> neg() const {
+    return _mm256_xor_ps(_mm256_set1_ps(-0.f), values);
+  }
+  Vec256<float> log() const {
+    return Vec256<float>(Sleef_logf8_u10(values));
+  }
+  Vec256<float> log2() const {
+    return Vec256<float>(Sleef_log2f8_u10(values));
+  }
+  Vec256<float> log10() const {
+    return Vec256<float>(Sleef_log10f8_u10(values));
+  }
+  Vec256<float> log1p() const {
+    return Vec256<float>(Sleef_log1pf8_u10(values));
+  }
+  Vec256<float> exp() const {
+    return Vec256<float>(Sleef_expf8_u10(values));
+  }
+  Vec256<float> expm1() const {
+    return Vec256<float>(Sleef_expm1f8_u10(values));
+  }
+  Vec256<float> erf() const {
+    return Vec256<float>(Sleef_erff8_u10(values));
+  }
+  Vec256<float> erfc() const {
+    return Vec256<float>(Sleef_erfcf8_u15(values));
+  }
+  Vec256<float> cos() const {
+    return map(std::cos);
+  }
+  Vec256<float> acos() const {
+    return Vec256<float>(Sleef_acosf8_u10(values));
+  }
+  Vec256<float> cosh() const {
+    return map(std::cosh);
+  }
+  Vec256<float> sin() const {
+    return map(std::sin);
+  }
+  Vec256<float> asin() const {
+    return Vec256<float>(Sleef_asinf8_u10(values));
+  }
+  Vec256<float> sinh() const {
+    return map(std::sinh);
+  }
+  Vec256<float> tan() const {
+    return map(std::tan);
+  }
+  Vec256<float> atan() const {
+    return Vec256<float>(Sleef_atanf8_u10(values));
+  }
+  Vec256<float> tanh() const {
+    return Vec256<float>(Sleef_tanhf8_u10(values));
+  }
+  Vec256<float> sqrt() const {
+    return _mm256_sqrt_ps(values);
+  }
+  Vec256<float> rsqrt() const {
+    return _mm256_div_ps(_mm256_set1_ps(1), _mm256_sqrt_ps(values));
+  }
+  Vec256<float> ceil() const {
+    return _mm256_ceil_ps(values);
+  }
+  Vec256<float> floor() const {
+    return _mm256_floor_ps(values);
+  }
+  Vec256<float> round() const {
+    return _mm256_round_ps(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+  }
+  Vec256<float> trunc() const {
+    return _mm256_round_ps(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
+  }
+  Vec256<float> reciprocal() const {
+    return _mm256_div_ps(_mm256_set1_ps(1), values);
+  }
+  // Comparison using the _CMP_**_OQ predicate.
+  //   `O`: get false if an operand is NaN
+  //   `Q`: do not raise if an operand is NaN
+  Vec256<float> operator==(const Vec256<float>& other) const {
+    return _mm256_cmp_ps(values, other.values, _CMP_EQ_OQ);
+  }
+
+  Vec256<float> operator!=(const Vec256<float>& other) const {
+    return _mm256_cmp_ps(values, other.values, _CMP_NEQ_OQ);
+  }
+
+  Vec256<float> operator<(const Vec256<float>& other) const {
+    return _mm256_cmp_ps(values, other.values, _CMP_LT_OQ);
+  }
+
+  Vec256<float> operator<=(const Vec256<float>& other) const {
+    return _mm256_cmp_ps(values, other.values, _CMP_LE_OQ);
+  }
+
+  Vec256<float> operator>(const Vec256<float>& other) const {
+    return _mm256_cmp_ps(values, other.values, _CMP_GT_OQ);
+  }
+
+  Vec256<float> operator>=(const Vec256<float>& other) const {
+    return _mm256_cmp_ps(values, other.values, _CMP_GE_OQ);
+  }
+  Vec256<float> pow(const Vec256<float> &b) const {
+    return Vec256<float>(Sleef_powf8_u10(values, b));
+  }
 };
 
 template <>
 Vec256<float> inline operator+(const Vec256<float>& a, const Vec256<float>& b) {
   return _mm256_add_ps(a, b);
+}
+
+template <>
+Vec256<float> inline operator*(const Vec256<float>& a, const Vec256<float>& b) {
+  return _mm256_mul_ps(a, b);
+}
+
+template <>
+Vec256<float> inline operator/(const Vec256<float>& a, const Vec256<float>& b) {
+  return _mm256_div_ps(a, b);
+}
+
+// Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
+// either input is a NaN.
+template <>
+Vec256<float> inline maximum(const Vec256<float>& a, const Vec256<float>& b) {
+  Vec256<float> max = _mm256_max_ps(a, b);
+  Vec256<float> isnan = _mm256_cmp_ps(a, b, _CMP_UNORD_Q);
+  // Exploit the fact that all-ones is a NaN.
+  return _mm256_or_ps(max, isnan);
+}
+
+// Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
+// either input is a NaN.
+template <>
+Vec256<float> inline minimum(const Vec256<float>& a, const Vec256<float>& b) {
+  Vec256<float> min = _mm256_min_ps(a, b);
+  Vec256<float> isnan = _mm256_cmp_ps(a, b, _CMP_UNORD_Q);
+  // Exploit the fact that all-ones is a NaN.
+  return _mm256_or_ps(min, isnan);
 }
 
 // ********** Vec256<int32_t> ***********
@@ -166,7 +502,46 @@ struct Vec256<int32_t> : public Vec256i {
       std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
     }
   }
+  Vec256<int32_t> abs() const {
+    return _mm256_abs_epi32(values);
+  }
+  Vec256<int32_t> operator==(const Vec256<int32_t>& other) const {
+    return _mm256_cmpeq_epi32(values, other.values);
+  }
+  Vec256<int32_t> operator!=(const Vec256<int32_t>& other) const {
+    return invert(_mm256_cmpeq_epi32(values, other.values));
+  }
+  Vec256<int32_t> operator<(const Vec256<int32_t>& other) const {
+    return _mm256_cmpgt_epi32(other.values, values);
+  }
+  Vec256<int32_t> operator<=(const Vec256<int32_t>& other) const {
+    return invert(_mm256_cmpgt_epi32(values, other.values));
+  }
+  Vec256<int32_t> operator>(const Vec256<int32_t>& other) const {
+    return _mm256_cmpgt_epi32(values, other.values);
+  }
+  Vec256<int32_t> operator>=(const Vec256<int32_t>& other) const {
+    return invert(_mm256_cmpgt_epi32(other.values, values));
+  }
+  Vec256<float> to_float() const {
+    return Vec256<float>(_mm256_cvtepi32_ps(values));
+  }
 };
+
+template <>
+Vec256<int32_t> inline maximum(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
+  return _mm256_max_epi32(a, b);
+}
+
+template <>
+Vec256<int32_t> inline operator*(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
+  return _mm256_mullo_epi32(a, b);
+}
+
+template <>
+Vec256<int32_t> inline minimum(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
+  return _mm256_min_epi32(a, b);
+}
 
 #endif // #if defined(__AVX__) && !defined(_MSC_VER)
 

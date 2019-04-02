@@ -35,6 +35,7 @@ static auto cpu_compilation_unit_template = CodeTemplate(R"(
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <cmath>
 
 ${vec256_header}
 
