@@ -55,7 +55,7 @@ static std::string scalarValue(const double v) {
       out << "POS_INFINITY";
     }
   } else {
-    out << std::scientific << v << "f";
+    out << std::setprecision(15) << v;
   }
   return out.str();
 }
@@ -88,6 +88,14 @@ static std::string variableType(const std::shared_ptr<c10::Type>& t) {
   if (t->kind() == TypeKind::IntType) {
     return "int";
   } else if (t->kind() == TypeKind::FloatType) {
+    // TODO: Revisit this. We are in a strange position where we do not have a
+    // distinction between float and double in our IR or in our frontend, but
+    // this selection is critical for trading-off performance v.s. accuracy,
+    // in some cases. For example, test_distributions.py has situations where
+    // we have constants derived from pi. Be emitting float here, we lose
+    // precision and in those tests we have accuracy issues. It may be worth it
+    // to try to model float v.s. double and allow the end user to choose
+    // between these depending on their use cases.
     return "float";
   } else if (t->kind() == TypeKind::BoolType) {
     return "bool";

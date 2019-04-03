@@ -4305,8 +4305,7 @@ class TestJit(TestCase):
 
     def test_log_prob(self):
         for Dist, keys, values, sample in self._examples():
-            # FIXME traced functions produce incorrect results
-            xfail = [LowRankMultivariateNormal, MultivariateNormal]
+            xfail = [Binomial, LowRankMultivariateNormal, MultivariateNormal]
             if Dist in xfail:
                 continue
 
@@ -4326,7 +4325,6 @@ class TestJit(TestCase):
 
     def test_enumerate_support(self):
         for Dist, keys, values, sample in self._examples():
-            # FIXME traced functions produce incorrect results
             xfail = [Binomial]
             if Dist in xfail:
                 continue
@@ -4372,7 +4370,7 @@ class TestJit(TestCase):
 
     def test_variance(self):
         for Dist, keys, values, sample in self._examples():
-            if Dist in [Cauchy, HalfCauchy]:
+            if Dist in [Cauchy, HalfCauchy, Gumbel]:
                 continue  # infinite variance
 
             def f(*values):
@@ -4396,7 +4394,6 @@ class TestJit(TestCase):
 
     def test_entropy(self):
         for Dist, keys, values, sample in self._examples():
-            # FIXME traced functions produce incorrect results
             xfail = [LowRankMultivariateNormal, MultivariateNormal]
             if Dist in xfail:
                 continue
