@@ -172,7 +172,10 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
 CALL_VIA_TYPE = CodeTemplate("""\
-TypeDefault::${method_prefix_derived}${api_name}(${type_method_args})""")
+[&](){
+${maybe_record_profile}
+return TypeDefault::${method_prefix_derived}${api_name}(${type_method_args});
+}()""")
 
 CALL_VIA_DERIVED = CodeTemplate("""\
 baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
@@ -183,6 +186,7 @@ baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
 DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
 auto tmp = ([&]() {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
+  ${maybe_record_profile}
   return ${base_type_call};
 })();
 ${return_values} = ${rhs_value};
@@ -191,6 +195,7 @@ ${return_values} = ${rhs_value};
 DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
 {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
+  ${maybe_record_profile}
   ${base_type_call};
 }
 """)
@@ -768,7 +773,8 @@ def emit_body(declaration):
                 RUN_ONLY_IN_DEBUG_MODE.substitute(statements=enforce_same_ptrs_stmts)
         return call
 
-    def emit_call(env):
+    def emit_call(env, profile_str):
+        maybe_record_profile = profile_str if profile_str else ''
         combined = nested_dict(env, declaration)
         extra_wrapping_stmts = []
         if strategy == 'use_derived':
@@ -783,11 +789,14 @@ def emit_body(declaration):
                 call = DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
                     base_type_call=base_type_call,
                     return_values=tie_return_values(),
-                    rhs_value=rhs_value)
+                    rhs_value=rhs_value,
+                    maybe_record_profile=maybe_record_profile)
             else:
                 call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
-                    base_type_call=base_type_call)
+                    base_type_call=base_type_call,
+                    maybe_record_profile=maybe_record_profile)
         else:
+            declaration['maybe_record_profile'] = maybe_record_profile
             call = CALL_VIA_TYPE.substitute(declaration)
             if not modifies_arguments and not returns_void:
                 call = '{} = {}'.format(tie_return_values(), call)
@@ -860,10 +869,6 @@ def emit_body(declaration):
     combined = nested_dict(env, declaration)
 
     body = []
-    if base_name not in DONT_PROFILE:
-        input_names = record_function_input_names()
-        body.append(
-            RECORD_FUNCTION.substitute(combined, input_names=input_names))
     if strategy != 'use_type':
         body.extend(unpack_args(env, declaration))
     if requires_derivative:
@@ -874,7 +879,12 @@ def emit_body(declaration):
     pre_record_trace, post_record_trace = emit_record_trace(env)
 
     body.append(pre_record_trace)
-    body.append(emit_call(env))
+    if base_name not in DONT_PROFILE:
+        input_names = record_function_input_names()
+        profile_str = RECORD_FUNCTION.substitute(combined, input_names=input_names)
+    else:
+        profile_str = None
+    body.append(emit_call(env, profile_str))
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
