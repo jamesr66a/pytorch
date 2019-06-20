@@ -219,6 +219,21 @@ struct PythonPrintPass {
   // used method names
   std::unordered_set<std::string> used_method_names_;
 
+  SourceRange* cur_source_range_ = nullptr;
+
+  struct SourceRangeCtxMgr {
+    SourceRangeCtxMgr(SourceRange* new_range, SourceRange** cur_source_range)
+        : cur_source_range(cur_source_range) {
+      old = *cur_source_range;
+      *cur_source_range = new_range;
+    }
+    ~SourceRangeCtxMgr() {
+      *cur_source_range = old;
+    }
+    SourceRange* old = nullptr;
+    SourceRange** cur_source_range = nullptr;
+  };
+
   // scanValue, scanNode, scanBlock:
   // decide if it is safe to omit the output of a temporary variable,
   // and inline the expression into its use
@@ -405,6 +420,13 @@ struct PythonPrintPass {
   std::unordered_map<Value*, std::string> value_names_;
 
   std::string useOf(Value* v) const {
+    if (cur_source_range_) {
+      std::cout << "Expr: " << value_names_.at(v) << "\n";
+      std::cout << "Source range:\n";
+      std::cout << "Node:\n";
+      v->node()->dump();
+      cur_source_range_->highlight(std::cout);
+    }
     return value_names_.at(v);
   }
   void assignValue(Value* v, const std::string& s) {
@@ -543,6 +565,8 @@ struct PythonPrintPass {
   }
 
   void printLoop(LoopView stmt) {
+    auto range = stmt.node()->sourceRange();
+    SourceRangeCtxMgr guard(&range, &cur_source_range_);
     // Loop carried dependencies are handled by assigning their initial
     // values to the node->outputs() before the loop,
     // and assign node->outputs() to the new values at the end of each trip.
@@ -660,6 +684,8 @@ struct PythonPrintPass {
   }
 
   void printNode(Node* node, bool print_const) {
+    auto range = node->sourceRange();
+    SourceRangeCtxMgr guard(&range, &cur_source_range_);
     // Check for class dependencies. If this node inputs or outputs a class
     // type, we need to add it to our table of dependencies.
     for (const auto input : node->inputs()) {
