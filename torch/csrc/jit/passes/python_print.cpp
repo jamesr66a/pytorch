@@ -18,7 +18,40 @@ static bool isPrint(char s) {
   return s > 0x1f && s < 0x7f;
 }
 
-void printQuotedString(std::ostream& stmt, const std::string& str) {
+struct ExprStr {
+  ExprStr(std::string s, c10::optional<SourceRange> sr = c10::nullopt)
+      : s(std::move(s)), sr(std::move(sr)) {}
+
+  ExprStr() = default;
+
+  const std::string& str() const {
+    return s;
+  }
+
+  const c10::optional<SourceRange>& sourceRange() const {
+    return sr;
+  }
+
+ private:
+  std::string s;
+  c10::optional<SourceRange> sr;
+};
+
+struct SourceRangeStringStream {
+  std::string str() {
+    return body_.str();
+  }
+
+  std::ostringstream body_;
+};
+
+template <typename T>
+SourceRangeStringStream& operator<<(SourceRangeStringStream& out, const T& c) {
+  out.body_ << c;
+  return out;
+}
+
+void printQuotedString(SourceRangeStringStream& stmt, const std::string& str) {
   stmt << "\"";
   for (auto s : str) {
     switch (s) {
@@ -86,7 +119,9 @@ static bool isValidIdentifier(const std::string& name) {
   return true;
 }
 
-static void emitQualifiedName(std::ostream& out, const QualifiedName& name) {
+static void emitQualifiedName(
+    SourceRangeStringStream& out,
+    const QualifiedName& name) {
   const auto& name_ = name.name();
   const auto& prefix_ = name.prefix();
   if (isValidIdentifier(name_)) {
@@ -109,7 +144,7 @@ static void emitQualifiedName(std::ostream& out, const QualifiedName& name) {
 // if a field is not a valid Python identifier, then it will print as, e.g.
 // getattr(self, "0").b
 static std::string getValidQualifiedName(const QualifiedName& name) {
-  std::stringstream ss;
+  SourceRangeStringStream ss;
   emitQualifiedName(ss, name);
   return ss.str();
 }
@@ -166,8 +201,24 @@ const static std::unordered_set<std::string> reserved_names = {
     "yield",
 };
 
+template <>
+SourceRangeStringStream& operator<<(
+    SourceRangeStringStream& out,
+    const ExprStr& c) {
+  if (c.sourceRange()) {
+    if (auto flc = c.sourceRange()->file_line_col()) {
+      std::string filename;
+      size_t line, col;
+      std::tie(filename, line, col) = *flc;
+      std::cout << c.str() << " # " << filename << ":" << line << ":" << col;
+    }
+  }
+  out.body_ << c.str();
+  return out;
+}
+
 struct PythonPrintPass {
-  std::ostringstream body_;
+  SourceRangeStringStream body_;
 
   // constants are written to this table, and given then named CONSTANTS.cN
   // where N is the index into this table.
@@ -383,7 +434,7 @@ struct PythonPrintPass {
   // unique names might not be valid identifiers,
   // force them to be by rewriting them
   static std::string makeValidIdentifier(const std::string& candidate) {
-    std::stringstream ss;
+    SourceRangeStringStream ss;
     if (candidate.size() == 0 || isdigit(candidate[0]))
       ss << "_";
     for (char c : candidate) {
@@ -402,13 +453,13 @@ struct PythonPrintPass {
   }
 
   // map from Value to how it should be printed at each use
-  std::unordered_map<Value*, std::string> value_names_;
+  std::unordered_map<Value*, ExprStr> value_names_;
 
-  std::string useOf(Value* v) const {
+  const ExprStr& useOf(Value* v) const {
     return value_names_.at(v);
   }
-  void assignValue(Value* v, const std::string& s) {
-    value_names_[v] = s;
+  void assignValue(Value* v, ExprStr s) {
+    value_names_[v] = std::move(s);
   }
   void assignValue(Value* v, Value* w) {
     assignValue(v, useOf(w));
@@ -421,7 +472,7 @@ struct PythonPrintPass {
 
   size_t level = 0;
   // indent to the current indent level
-  std::ostream& indent() {
+  SourceRangeStringStream& indent() {
     for (size_t i = 0; i < level; ++i) {
       body_ << "  ";
     }
@@ -449,7 +500,7 @@ struct PythonPrintPass {
   }
 
   void printValueList(
-      std::ostream& stmt,
+      SourceRangeStringStream& stmt,
       at::ArrayRef<Value*> list,
       const char* begin = "",
       const char* end = "") {
@@ -464,7 +515,7 @@ struct PythonPrintPass {
   }
 
   void printDict(
-      std::ostream& stmt,
+      SourceRangeStringStream& stmt,
       at::ArrayRef<Value*> key_value_pairs,
       const char* begin = "{",
       const char* end = "}") {
@@ -590,7 +641,8 @@ struct PythonPrintPass {
     }
   }
 
-  bool isLongLine(const std::string& str) {
+  bool isLongLine(const ExprStr& es) {
+    const auto& str = es.str();
     return str.size() + level * 2 >= 40;
   }
 
@@ -634,7 +686,7 @@ struct PythonPrintPass {
     }
   }
 
-  void printOutputDefinition(Node* node, const std::string& str) {
+  void printOutputDefinition(Node* node, const ExprStr& es) {
     assignValuesToTheirUniqueNames(node->outputs());
     indent();
     // Print outputs
@@ -642,7 +694,7 @@ struct PythonPrintPass {
       printValueList(body_, node->outputs());
       body_ << " = ";
     }
-    body_ << str << "\n";
+    body_ << es << "\n";
   }
 
   // Recursively check contained types for any class dependencies
@@ -724,7 +776,7 @@ struct PythonPrintPass {
           assignValue(graph->inputs().at(i), node->inputs().at(i));
         }
         printBody(graph->block());
-        std::stringstream ss;
+        SourceRangeStringStream ss;
         ss << "fork(" << name << ")";
         printOutputDefinition(node, ss.str());
       } break;
@@ -750,7 +802,7 @@ struct PythonPrintPass {
         printBody(graph->block());
       } break;
       default:
-        std::stringstream ss;
+        SourceRangeStringStream ss;
         printRHS(ss, node);
 
         // we prevent long constants from inlining here.
@@ -762,13 +814,13 @@ struct PythonPrintPass {
         } else {
           // this node is safe to inline, so assign the output value
           // to that expression directly
-          assignValue(node->output(), ss.str());
+          assignValue(node->output(), {ss.str(), node->sourceRange()});
         }
     }
   }
 
   void printMaybeAnnotatedConstantList(
-      std::ostream& stmt,
+      SourceRangeStringStream& stmt,
       const char* the_type,
       size_t list_size,
       const IValue& the_list) {
@@ -779,13 +831,13 @@ struct PythonPrintPass {
     }
   }
 
-  void printConstant(std::ostream& stmt, const IValue& v) {
+  void printConstant(SourceRangeStringStream& stmt, const IValue& v) {
     if (v.isTensor()) {
       stmt << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
     } else if (v.isString()) {
       printQuotedString(stmt, v.toStringRef());
     } else if (v.isDevice()) {
-      std::stringstream ss;
+      SourceRangeStringStream ss;
       ss << v.toDevice();
       stmt << "torch.device(";
       printQuotedString(stmt, ss.str());
@@ -811,7 +863,7 @@ struct PythonPrintPass {
     }
   }
 
-  void printNone(std::ostream& stmt, const Node* node) {
+  void printNone(SourceRangeStringStream& stmt, const Node* node) {
     if (node->output()->type()->isSubtypeOf(NoneType::get())) {
       stmt << "None";
       return;
@@ -842,7 +894,7 @@ struct PythonPrintPass {
   }
 
   // Prints the RHS value of a Node, e.g. `aten.add(x, y)`
-  void printRHS(std::ostream& stmt, Node* node) {
+  void printRHS(SourceRangeStringStream& stmt, Node* node) {
     switch (node->kind()) {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
@@ -858,7 +910,8 @@ struct PythonPrintPass {
           stmt << "ops.prim.IgnoredPythonOp";
         } else {
           stmt << "^" << value->name();
-          value->writeScalars(stmt);
+          // TODO
+          value->writeScalars(stmt.body_);
         }
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
@@ -989,7 +1042,9 @@ struct PythonPrintPass {
     }
   }
 
-  std::ostream& printBlock(Block* root, bool block_has_other_statements) {
+  SourceRangeStringStream& printBlock(
+      Block* root,
+      bool block_has_other_statements) {
     // pythons weird 'pass' syntax creates a bunch of places where we have to
     // check if this block would be empty. But not everything in a block is a
     // node. Sometimes if, loop, and return statements will follow this block
@@ -1007,7 +1062,7 @@ struct PythonPrintPass {
 
   void printDefaultValue(
       const TypePtr& typ,
-      std::ostream& stmt,
+      SourceRangeStringStream& stmt,
       const IValue& value) {
     // xxx - many weak script modules store default values for broadcasting
     // lists that are not actually the same type as the argument. We can only
@@ -1144,13 +1199,13 @@ struct PythonPrintPass {
         class_deps_.end());
   }
 
-  void print(std::ostream& out) {
+  void print(SourceRangeStringStream& out) {
     out << getImports() << body_.str();
   }
 };
 
 void PythonPrint(
-    std::ostream& out,
+    SourceRangeStringStream& out,
     const Function& func,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
@@ -1162,7 +1217,7 @@ void PythonPrint(
 }
 
 void PythonPrint(
-    std::ostream& out,
+    SourceRangeStringStream& out,
     const script::CompilationUnit& cu,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
@@ -1174,7 +1229,7 @@ void PythonPrint(
 }
 
 void PythonPrint(
-    std::ostream& out,
+    SourceRangeStringStream& out,
     const c10::NamedTypePtr& classType,
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& class_table,
