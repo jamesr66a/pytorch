@@ -166,6 +166,36 @@ const static std::unordered_set<std::string> reserved_names = {
     "yield",
 };
 
+struct ExprStr {
+  ExprStr(std::string s, c10::optional<SourceRange> sr = c10::nullopt)
+      : s(std::move(s)), sr(std::move(sr)) {}
+
+  ExprStr() {}
+
+  operator std::string() const {
+    if (sr && sr->source() && sr->source()->filename()) {
+      const auto& range = *sr;
+      const auto& source = range.source();
+      auto lineno = source->lineno_for_offset(range.start());
+      auto col_offset =
+          (int)range.start() - (int)source->offset_for_line(lineno);
+      std::cout << s << " # " << source->filename().value() << ":"
+                << source->lineno_to_source_lineno(lineno) << ":" << col_offset
+                << std::endl;
+    }
+    return s;
+  }
+
+ private:
+  std::string s;
+  c10::optional<SourceRange> sr;
+};
+
+std::ostream& operator<<(std::ostream& os, const ExprStr& es) {
+  os << std::string(es);
+  return os;
+}
+
 struct PythonPrintPass {
   std::ostringstream body_;
 
@@ -402,13 +432,13 @@ struct PythonPrintPass {
   }
 
   // map from Value to how it should be printed at each use
-  std::unordered_map<Value*, std::string> value_names_;
+  std::unordered_map<Value*, ExprStr> value_names_;
 
-  std::string useOf(Value* v) const {
+  const ExprStr& useOf(Value* v) const {
     return value_names_.at(v);
   }
-  void assignValue(Value* v, const std::string& s) {
-    value_names_[v] = s;
+  void assignValue(Value* v, ExprStr s) {
+    value_names_[v] = std::move(s);
   }
   void assignValue(Value* v, Value* w) {
     assignValue(v, useOf(w));
@@ -762,7 +792,7 @@ struct PythonPrintPass {
         } else {
           // this node is safe to inline, so assign the output value
           // to that expression directly
-          assignValue(node->output(), ss.str());
+          assignValue(node->output(), {ss.str(), node->sourceRange()});
         }
     }
   }
