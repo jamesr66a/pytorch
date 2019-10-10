@@ -42,15 +42,16 @@ void badArgType(const T& v) {
       ". File a bug report.");
 }
 
-thread_local std::shared_ptr<TracingState> tracing_state;
+thread_local std::shared_ptr<TracingStateList> tracing_states = std::make_shared<TracingStateList>(nullptr, nullptr);
 } // namespace detail
 
 std::function<void()> pauseTracing() {
   // NOLINTNEXTLINE
-  std::shared_ptr<tracer::TracingState> state = getTracingState();
-  tracer::setTracingState(nullptr);
+  tracer::pushTracingState(nullptr);
 
-  return [state]() { tracer::setTracingState(state); };
+  return []() {
+    detail::tracing_states = detail::tracing_states->next;
+  };
 }
 
 void delValueTrace(const IValue& var) {
@@ -310,7 +311,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(
     AT_ERROR("Tracing can't be nested");
   }
   auto state = std::make_shared<TracingState>();
-  setTracingState(state);
+  pushTracingState(state);
 
   // if we are a module, then make sure the modules parameters are in the map
   // and mapped to accesses to the self object
@@ -337,12 +338,12 @@ void exit(const Stack& outputs) {
     state->graph->registerOutput(state->getOutput(output));
     i++;
   }
-  setTracingState(nullptr);
+  popTracingState();
 }
 
 // Abort tracing. Used to reset the state in case of errors.
 void abandon() {
-  setTracingState(nullptr);
+  detail::tracing_states = std::make_shared<TracingStateList>(nullptr, nullptr);
 }
 
 void setValueTrace(const IValue& v, Value* value) {
@@ -580,12 +581,17 @@ void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
 }
 
 const std::shared_ptr<TracingState>& getTracingState() {
-  return detail::tracing_state;
+  return detail::tracing_states->state;
 }
 
-void setTracingState(std::shared_ptr<TracingState> state) {
-  detail::tracing_state = std::move(state);
+void pushTracingState(std::shared_ptr<TracingState> state) {
+  detail::tracing_states = std::make_shared<TracingStateList>(std::move(state), detail::tracing_states);
 }
+
+void popTracingState() {
+  detail::tracing_states = detail::tracing_states->next;
+}
+
 
 TracingState::TracingState()
     : graph(new Graph()), env_stack{Frame()} {}
