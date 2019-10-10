@@ -603,8 +603,10 @@ void initJitScriptBindings(PyObject* module) {
             auto graph = tracer::createGraphByTracing(
                 func, typed_inputs, var_lookup_fn, force_outplace, &self);
             const auto method_name = QualifiedName(self.name(), name);
+            std::string mangled_name;
             auto fn = self.class_compilation_unit()->create_function(
-                method_name, graph);
+                method_name, graph, /*shouldMangle=*/true);
+            std::cout << "Name " << fn->name() << std::endl;
             self.type()->addMethod(fn);
             didFinishEmitModule(self);
           })
