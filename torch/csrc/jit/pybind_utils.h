@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
@@ -9,6 +10,7 @@
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/python_custom_class.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/module.h>
@@ -18,7 +20,6 @@
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/six.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
