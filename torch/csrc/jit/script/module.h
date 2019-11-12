@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/named_value.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/script/object.h>
 #include <torch/csrc/jit/source_range.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -135,7 +136,7 @@ struct TORCH_API Method {
   Function* function_;
 };
 
-struct TORCH_API Module {
+struct TORCH_API Module : public Object {
   explicit Module(c10::QualifiedName class_name);
   Module(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Module(
@@ -144,11 +145,11 @@ struct TORCH_API Module {
       bool shouldMangle = false);
   // module_value_ null and will be lazily initialized if is needed
   Module() {}
-  Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
+  Module(ModulePtr module_value) : Object(std::move(module_value)) {}
   ~Module() {}
 
   const c10::QualifiedName& name() const {
-    return *module_object()->type()->name();
+    return *object_value()->type()->name();
   }
 
   void set_optimized(bool o) {
@@ -174,14 +175,14 @@ struct TORCH_API Module {
   // whether a slot is a parameter to be able to classify it.
   void register_buffer(const std::string& name, at::Tensor v) {
     type()->addOrCheckAttribute(name, TensorType::get());
-    module_object()->setAttr(name, std::move(v));
+    object_value()->setAttr(name, std::move(v));
   }
   void register_parameter(
       const std::string& name,
       at::Tensor v,
       bool is_buffer) {
     type()->addOrCheckAttribute(name, TensorType::get(), !is_buffer);
-    module_object()->setAttr(name, std::move(v));
+    object_value()->setAttr(name, std::move(v));
   }
   void register_attribute(
       const std::string& name,
@@ -189,16 +190,16 @@ struct TORCH_API Module {
       IValue v,
       bool is_param = false) {
     type()->addOrCheckAttribute(name, t, is_param);
-    module_object()->setAttr(name, std::move(v));
+    object_value()->setAttr(name, std::move(v));
   }
   void register_module(const std::string& name, const Module& module) {
     type()->addOrCheckAttribute(name, module.type());
-    module_object()->setAttr(name, module.module_object());
+    object_value()->setAttr(name, module.object_value());
   }
 
   void setattr(const std::string& name, IValue v) {
-    size_t slot = module_object()->type()->getAttributeSlot(name);
-    const TypePtr& expected = module_object()->type()->getAttribute(slot);
+    size_t slot = object_value()->type()->getAttributeSlot(name);
+    const TypePtr& expected = object_value()->type()->getAttribute(slot);
     TORCH_CHECK(expected, "Module has no attribute '", name, "'");
     TORCH_CHECK(
         v.type()->isSubtypeOf(expected),
@@ -209,22 +210,22 @@ struct TORCH_API Module {
         "', but found '",
         v.type()->python_str(),
         "'");
-    module_object()->setSlot(slot, std::move(v));
+    object_value()->setSlot(slot, std::move(v));
   }
 
   IValue attr(const std::string& name) const {
-    return module_object()->getAttr(name);
+    return object_value()->getAttr(name);
   }
 
   IValue attr(const std::string& name, IValue or_else) const {
-    if (auto r = module_object()->type()->findAttributeSlot(name)) {
-      return module_object()->getSlot(*r);
+    if (auto r = object_value()->type()->findAttributeSlot(name)) {
+      return object_value()->getSlot(*r);
     }
     return or_else;
   }
 
   bool hasattr(const std::string& name) const {
-    return module_object()->type()->findAttributeSlot(name).has_value();
+    return object_value()->type()->findAttributeSlot(name).has_value();
   }
 
   // each module owns its method. The reference returned here
@@ -266,11 +267,9 @@ struct TORCH_API Module {
       int level) const;
 
   const std::vector<Method> get_methods() const {
-    return fmap(
-        type()->methods(),
-        [&](Function* func) {
-          return Method(module_object(), func);
-        });
+    return fmap(type()->methods(), [&](Function* func) {
+      return Method(object_value(), func);
+    });
   }
 
   c10::optional<Method> find_method(const std::string& basename) const;
@@ -350,13 +349,11 @@ struct TORCH_API Module {
 
   void clone_method(const Module& orig, const std::string& name);
 
-  ModulePtr module_object() const;
-
   ClassTypePtr type() const {
-    return module_object()->type();
+    return object_value()->type();
   }
   std::shared_ptr<CompilationUnit> class_compilation_unit() const {
-    return module_object()->compilation_unit();
+    return object_value()->compilation_unit();
   }
 
   // so that C++ users can easily add methods
@@ -370,7 +367,7 @@ struct TORCH_API Module {
   IValue create_class(const c10::QualifiedName& name, Stack stack) const;
 
   size_t num_slots() const {
-    return module_object()->slots().size();
+    return object_value()->slots().size();
   }
 
  private:
@@ -389,9 +386,6 @@ struct TORCH_API Module {
       const c10::optional<at::Device>& device,
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
-
-  // mutable be we lazily initialize in module_object.
-  mutable ModulePtr module_value_;
 };
 
 namespace detail {
@@ -460,8 +454,8 @@ struct slot_iterator_impl {
     return cursors_.back();
   }
   IValue cur() const {
-    return return_module() ? top().module_.module_object()
-                           : top().module_.module_object()->getSlot(top().i_);
+    return return_module() ? top().module_.object_value()
+                           : top().module_.object_value()->getSlot(top().i_);
   }
 
   // advance to the next slot in a depth first pre-order traversal of the
@@ -488,7 +482,7 @@ struct slot_iterator_impl {
     // traversals. We do this by adding a new SlotCursor to track the traversal.
     if (recurse_ &&
         top()
-            .module_.module_object()
+            .module_.object_value()
             ->type()
             ->getAttribute(top().i_)
             ->is_module()) {
@@ -502,7 +496,7 @@ struct slot_iterator_impl {
   // otherwise, we have to continue advancing.
   bool valid() const {
     return top().i_ < int64_t(top().module_.num_slots()) &&
-        Policy::valid(top().module_.module_object()->type(), top().i_);
+        Policy::valid(top().module_.object_value()->type(), top().i_);
   }
   void while_not_valid_next() {
     // advance iteration until we are either at the end (cursors_.empty())

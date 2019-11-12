@@ -360,7 +360,7 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   // Make a graph with a fake self argument
   auto graph = func.function_->graph()->copy();
   auto v = graph->insertInput(0, "self");
-  v->setType(module.module_object()->type());
+  v->setType(module.object_value()->type());
   const auto name = QualifiedName(module.name(), "forward");
   auto method = module.class_compilation_unit()->create_function(name, graph);
   module.type()->addMethod(method);
@@ -373,7 +373,7 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
     IValue b;
   };
   std::unordered_set<const void*> visited;
-  std::vector<Work> work = {{lhs.module_object(), rhs.module_object()}};
+  std::vector<Work> work = {{lhs.object_value(), rhs.object_value()}};
   while (!work.empty()) {
     Work item = work.back();
     work.pop_back();
@@ -471,7 +471,7 @@ struct slot_dict_impl {
   static void bind(const py::module& m, const char* name) {
     py::class_<slot_dict_impl<Policy>>(m, name)
         .def(py::init(
-            [](Module& m) { return slot_dict_impl<Policy>(m.module_object()); }))
+            [](Module& m) { return slot_dict_impl<Policy>(m.object_value()); }))
         .def("contains", &slot_dict_impl<Policy>::contains)
         .def("items", &slot_dict_impl<Policy>::items)
         .def("setattr", &slot_dict_impl<Policy>::setattr)
@@ -607,7 +607,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_replicate_for_data_parallel",
           [](Module& module) {
-            const ModulePtr& obj = module.module_object();
+            const ModulePtr& obj = module.object_value();
             auto copy = c10::ivalue::Object::create(
                 c10::StrongTypePtr(obj->compilation_unit(), obj->type()),
                 obj->slots().size());
