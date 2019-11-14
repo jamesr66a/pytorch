@@ -1123,6 +1123,7 @@ struct GraphFuser {
         any_changed |= changed;
       }
     }
+
     refreshAliasDb();
 
     fuseConcats();
@@ -1206,14 +1207,30 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 } // anonymous namespace
 
 void FuseGraph(std::shared_ptr<Graph>& graph) {
-  GraphFuser(graph->block(), graph).run();
-  // After FuseGraph some common subexpressions may come back
-  EliminateCommonSubexpression(graph);
-  // We might have emitted a fair amount of useless shape propagating code, so
-  // remove it
-  EliminateDeadCode(graph);
-  // Improve the quality of shape propagation code that was left
-  PeepholeOptimizeShapeExpressions(graph->block());
+  std::cout << "graph_fuser.cpp: FuseGraph()" << std::endl;
+
+  auto* block = graph->block();
+  for (auto it = block->nodes().rbegin(); it != block->nodes().rend(); ++it) {
+    auto* node = *it;
+    std::cout << "kind: " << node->kind().toQualString() << std::endl;
+    if (node->kind() == aten::add) {
+      std::cout << "Sending add node to fuser" << std::endl;
+      mergeNodeWithFusionGroup(node, nullptr);
+    }
+  }
+
+
+
+  // Does nothing: to be replaced!
+
+  // GraphFuser(graph->block(), graph).run();
+  // // After FuseGraph some common subexpressions may come back
+  // EliminateCommonSubexpression(graph);
+  // // We might have emitted a fair amount of useless shape propagating code, so
+  // // remove it
+  // EliminateDeadCode(graph);
+  // // Improve the quality of shape propagation code that was left
+  // PeepholeOptimizeShapeExpressions(graph->block());
 }
 
 void CustomFuseGraph(

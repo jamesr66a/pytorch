@@ -9,10 +9,15 @@
 #include <memory>
 #include <vector>
 
+#define FUSER_DEBUG 1
+
 namespace torch {
 namespace jit {
 
 constexpr int kCPUDevice = -1;
+
+// Returns true if the node is added to the fusion group, false o.w.
+TORCH_API bool mergeNodeWithFusionGroup(const Node* const node, Node* fusion_group);
 
 // Assigns a "key" to the given fusion_group that it can use to run its
 // fusion later (via runFusion() below).
