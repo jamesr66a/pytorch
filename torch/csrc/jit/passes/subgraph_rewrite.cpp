@@ -19,7 +19,7 @@ graph(%x, %w, %b):
   return (%r))IR");
 }
 
-void SubgraphRewriter::RegisterRewritePattern(
+RewritePatternDescr* SubgraphRewriter::RegisterRewritePattern(
     const std::string& pattern,
     const std::string& replacement) {
   patterns_.emplace_back(new RewritePatternDescr());
@@ -29,6 +29,7 @@ void SubgraphRewriter::RegisterRewritePattern(
 
   d.replacement = replacement;
   script::parseIR(d.replacement, &d.replacement_graph);
+  return &d;
 }
 
 script::Module SubgraphRewriter::runOnModule(const script::Module& module) {
@@ -44,7 +45,8 @@ void SubgraphRewriter::runOnGraph(
     std::shared_ptr<Graph>& graph,
     const std::function<
         bool(const Match&, const std::unordered_map<std::string, Value*>&)>&
-        filter) {
+        filter,
+    const std::function<void(const RewriteCallbackInfo&)>& rewrite_callback) {
   for (const std::unique_ptr<RewritePatternDescr>& pattern : patterns_) {
     rewriteSinglePatternOnGraph(graph, *pattern, filter);
   }
@@ -55,7 +57,8 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     const RewritePatternDescr& pattern,
     const std::function<
         bool(const Match&, const std::unordered_map<std::string, Value*>&)>&
-        filter) {
+        filter,
+    const std::function<void(const RewriteCallbackInfo&)>& rewrite_callback) {
   std::unordered_map<Value*, Value*> rewrite_map;
   std::vector<Value*> values_to_rewrite;
 
@@ -97,6 +100,9 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     // mutable reference
     std::vector<Value*> new_outputs =
         insertGraph(*graph, const_cast<Graph&>(replacement_graph), inputs);
+
+    rewrite_callback(RewriteCallbackInfo{
+        inputs, outputs, new_outputs, &pattern, &match});
 
     // Record all planned rewritings
     AT_ASSERT(outputs.size() == new_outputs.size());

@@ -44,6 +44,18 @@ TORCH_API script::Module PatternBasedRewrite(const script::Module& module);
  */
 class TORCH_API SubgraphRewriter {
  public:
+  struct RewriteCallbackInfo {
+    std::vector<Value*> inputs;
+    std::vector<Value*> orig_outputs;
+    std::vector<Value*> new_outputs;
+    // Pointer to the rewrite descriptor that was matched agaginst
+    // A caller can use the output of RegisterRewritePattern to
+    // keep track of which pattern we're processing and
+    // use different logic for different patterns
+    const RewritePatternDescr* pattern;
+    const Match* match;
+  };
+
   // Run pattern-based subgraph rewrite pass on the module.
   script::Module runOnModule(const script::Module& module);
 
@@ -60,7 +72,9 @@ class TORCH_API SubgraphRewriter {
           filter =
               [](const Match&, const std::unordered_map<std::string, Value*>&) {
                 return true;
-              });
+              },
+      const std::function<void(const RewriteCallbackInfo&)>& rewrite_callback =
+          [](const RewriteCallbackInfo&) { return; });
 
   // Register standard rewrite patterns.
   void RegisterDefaultPatterns();
@@ -73,7 +87,7 @@ class TORCH_API SubgraphRewriter {
    *
    * See examples of pattern registering in `RegisterDefaultPatterns`.
    */
-  void RegisterRewritePattern(
+  RewritePatternDescr* RegisterRewritePattern(
       const std::string& pattern,
       const std::string& replacement);
 
@@ -89,7 +103,9 @@ class TORCH_API SubgraphRewriter {
           filter =
               [](const Match&, const std::unordered_map<std::string, Value*>&) {
                 return true;
-              });
+              },
+      const std::function<void(const RewriteCallbackInfo&)>& rewrite_callback =
+          [](const RewriteCallbackInfo&) { return; });
   bool overlapsWithPreviousMatches(const Match* match);
 };
 

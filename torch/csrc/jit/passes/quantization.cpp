@@ -947,18 +947,21 @@ graph(%self, %x):
 void FoldQuantizeCallIntoBuffer(
     script::Module& module,
     const std::string& method_name) {
-  const PatternInfo& pattern = PatternInfo::parse_from_str(R"(
+  const std::string& pattern = R"(
 graph(%self, %scale, %zero_point, %dtype):
    %weight = prim::GetAttr[name="weight"](%self)
    %weight_quant = aten::quantize_per_tensor(%weight, %scale, %zero_point, %dtype)
-   return (%weight_quant) )");
-  const Graph& pattern_graph = *pattern.pattern_graph;
-  const auto& vmap = pattern.vmap;
+   return (%weight_quant) )";
+  const std::string& replacement = R"(
+graph(%self, %scale, %zero_point, %dtype):
+   %weight_quant = prim::GetAttr[name="_quantized_weight"](%self)
+   return (%weight_quant) )";
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(pattern, replacement);
 
   auto method = module.get_method(method_name);
   auto graph = method.graph();
-  const auto& matches = findPatternMatches(pattern_graph, *graph);
-  // Extra filter on scale/zero_point/dtype to make sure they are Constant
   auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
@@ -969,12 +972,11 @@ graph(%self, %scale, %zero_point, %dtype):
         zero_point_node->kind() == prim::Constant &&
         dtype_node->kind() == prim::Constant;
   };
-  std::unordered_set<Node*> nodes_to_delete;
-  for (const auto& match : matches) {
-    if (!filter(match, vmap)) {
-      continue;
-    }
-    auto match_vmap = match.values_map;
+  auto callback = [&module](const SubgraphRewriter::RewriteCallbackInfo&
+                                rewrite_info) {
+    const auto& match = *rewrite_info.match;
+    const auto& match_vmap = match.values_map;
+    const auto& vmap = rewrite_info.pattern->vmap;
     auto float_weight = module.attr("weight").toTensor().data();
     auto scale = toIValue(match_vmap.at(vmap.at("scale"))).value().toDouble();
     auto zero_point =
@@ -985,19 +987,13 @@ graph(%self, %scale, %zero_point, %dtype):
         "_quantized_weight",
         at::quantize_per_tensor(float_weight, scale, zero_point, dtype));
 
-    // Replace the GetAttr[weight]->quantize_per_tensor sequence
-    // with a simple GetAttr[_quantized_weight] node.
-    Value* orig_weight = match_vmap.at(vmap.at("weight"));
-    Value* orig_weight_quant = match_vmap.at(vmap.at("weight_quant"));
-
-    orig_weight->node()->s_(attr::name, "_quantized_weight");
-    orig_weight_quant->replaceAllUsesWith(orig_weight);
-    nodes_to_delete.insert(orig_weight_quant->node());
-  }
-
-  for (Node* n : nodes_to_delete) {
-    n->destroy();
-  }
+    // Set appropriate SourceRanges
+    Node* orig_getattr =
+        rewrite_info.orig_outputs.at(0)->node()->input(0)->node();
+    rewrite_info.new_outputs.at(0)->node()->setSourceRange(
+        orig_getattr->sourceRange());
+  };
+  rewriter.runOnGraph(graph, filter, callback);
 }
 
 void InsertPrepackUnpack(std::shared_ptr<Graph>& graph) {
