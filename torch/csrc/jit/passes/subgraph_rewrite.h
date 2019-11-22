@@ -78,7 +78,7 @@ class TORCH_API SubgraphRewriter {
       const std::string& replacement);
 
  private:
-  std::vector<RewritePatternDescr> patterns_;
+  std::vector<std::unique_ptr<RewritePatternDescr>> patterns_;
   std::unordered_set<Node*> nodes_to_delete_;
 
   void rewriteSinglePatternOnGraph(
@@ -101,6 +101,11 @@ class TORCH_API SubgraphRewriter {
 struct RewritePatternDescr {
   std::string pattern;
   std::string replacement;
+
+  Graph pattern_graph;
+  std::unordered_map<std::string, Value*> vmap;
+
+  Graph replacement_graph;
 };
 
 } // namespace jit

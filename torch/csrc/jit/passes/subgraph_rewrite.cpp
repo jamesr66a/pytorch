@@ -22,8 +22,13 @@ graph(%x, %w, %b):
 void SubgraphRewriter::RegisterRewritePattern(
     const std::string& pattern,
     const std::string& replacement) {
-  RewritePatternDescr d = {pattern, replacement};
-  patterns_.push_back(d);
+  patterns_.emplace_back(new RewritePatternDescr());
+  RewritePatternDescr& d = *patterns_.back();
+  d.pattern = pattern;
+  script::parseIR(d.pattern, &d.pattern_graph, d.vmap);
+
+  d.replacement = replacement;
+  script::parseIR(d.replacement, &d.replacement_graph);
 }
 
 script::Module SubgraphRewriter::runOnModule(const script::Module& module) {
@@ -40,8 +45,8 @@ void SubgraphRewriter::runOnGraph(
     const std::function<
         bool(const Match&, const std::unordered_map<std::string, Value*>&)>&
         filter) {
-  for (const RewritePatternDescr& pattern : patterns_) {
-    rewriteSinglePatternOnGraph(graph, pattern, filter);
+  for (const std::unique_ptr<RewritePatternDescr>& pattern : patterns_) {
+    rewriteSinglePatternOnGraph(graph, *pattern, filter);
   }
 }
 
@@ -54,12 +59,10 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
   std::unordered_map<Value*, Value*> rewrite_map;
   std::vector<Value*> values_to_rewrite;
 
-  Graph pattern_graph;
-  std::unordered_map<std::string, Value*> vmap;
-  script::parseIR(pattern.pattern, &pattern_graph, vmap);
+  const Graph& pattern_graph = pattern.pattern_graph;
+  const auto& vmap = pattern.vmap;
 
-  Graph replacement_graph;
-  script::parseIR(pattern.replacement, &replacement_graph);
+  const Graph& replacement_graph = pattern.replacement_graph;
 
   const auto& matches = findPatternMatches(pattern_graph, *graph);
   for (const Match& match : matches) {
@@ -77,10 +80,10 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     // replacement subgraph. These would be inputs and outputs of the subgraph
     // we matched.
     std::vector<Value*> inputs, outputs;
-    for (Value* v : pattern_graph.inputs()) {
+    for (const Value* v : pattern_graph.inputs()) {
       inputs.push_back(match.values_map.at(v));
     }
-    for (Value* v : pattern_graph.outputs()) {
+    for (const Value* v : pattern_graph.outputs()) {
       outputs.push_back(match.values_map.at(v));
     }
 
@@ -90,8 +93,10 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     // produced by this new subgraph - we will then rewrite old outputs with the
     // new ones.
     WithInsertPoint insert_point(match.anchor);
+    // TODO: const cast is only here because `insertGraph` unnecessary takes a
+    // mutable reference
     std::vector<Value*> new_outputs =
-        insertGraph(*graph, replacement_graph, inputs);
+        insertGraph(*graph, const_cast<Graph&>(replacement_graph), inputs);
 
     // Record all planned rewritings
     AT_ASSERT(outputs.size() == new_outputs.size());
@@ -100,7 +105,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
       rewrite_map[outputs[idx]] = new_outputs[idx];
     }
     // Record all planned deletions
-    for (Node* pattern_n : pattern_graph.nodes()) {
+    for (const Node* pattern_n : pattern_graph.nodes()) {
       if (match.nodes_map.count(pattern_n)) {
         Node* n = match.nodes_map.at(pattern_n);
         nodes_to_delete_.insert(n);
