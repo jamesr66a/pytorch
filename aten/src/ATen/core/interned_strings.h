@@ -23,6 +23,8 @@ namespace c10 {
   _(namespaces, user)                \
   _(namespaces, _caffe2)             \
   _(namespaces, dimname)             \
+  _(namespaces, loop)                \
+  _(namespaces, scalar)              \
   _(namespaces, namespaces)          \
   _(prim, Assign)                    \
   _(prim, BroadcastingChunk)         \
@@ -237,7 +239,12 @@ namespace c10 {
   _(attr, kinds)                     \
   _(attr, types)                     \
   _(attr, scope)                     \
-  _(attr, keepdims)
+  _(attr, keepdims)                  \
+  _(loop, ElementWise)               \
+  _(scalar, add)                     \
+  _(scalar, mul)                     \
+  _(scalar, _float)
+
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \
