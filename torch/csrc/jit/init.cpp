@@ -23,6 +23,7 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/loop_fuser.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_graph.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
@@ -358,13 +359,15 @@ void initJITBindings(PyObject* module) {
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);
           })
-      .def("_jit_pass_onnx_unpack_quantized_weights",
+      .def(
+          "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict){
-                UnpackQuantizedWeights(graph, paramsDict);
-                return paramsDict;
-             },
-             pybind11::return_value_policy::move);
+             std::map<std::string, at::Tensor>& paramsDict) {
+            UnpackQuantizedWeights(graph, paramsDict);
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move)
+      .def("_jit_pass_loop_fuser", &passes::LoopFuser);
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
