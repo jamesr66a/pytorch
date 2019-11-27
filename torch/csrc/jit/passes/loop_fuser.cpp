@@ -366,15 +366,88 @@ void FuseElementWise(std::shared_ptr<Graph>& graph) {
   };
 }
 
-// Expand loop nest
-
-void ExpandLoopNest(std::shared_ptr<Graph>& graph) {
-  for (auto n_itr = graph->nodes().begin(); n_itr != graph->nodes().end();) {
-    Node* n = *n_itr++;
+// here be spaghetti
+void PrebroadcastInputs(std::shared_ptr<Graph>& graph) {
+  for (Node* n : graph->nodes()) {
     if (n->kind() == at::loop::ElementWise) {
-    }
-  }
+      // Figure out fully-specified broadcasted dimensions
+      std::vector<int64_t> rev_dims;
+
+      for (Value* i : n->inputs()) {
+        auto tensor_type = i->type()->cast<TensorType>();
+        TORCH_CHECK(tensor_type);
+        auto varying_sizes = tensor_type->sizes();
+        TORCH_CHECK(varying_sizes.isComplete());
+        auto sizes = varying_sizes.concrete_sizes().value();
+        size_t idx = 0;
+        for (auto size_riter = sizes.rbegin(); size_riter != sizes.rend();
+             size_riter++, idx++) {
+          if (rev_dims.size() <= idx) {
+            rev_dims.push_back(*size_riter);
+          } else {
+            if (rev_dims[idx] == 1) {
+              rev_dims[idx] = *size_riter;
+            }
+            if (*size_riter == 1) {
+              continue;
+            }
+            TORCH_CHECK(rev_dims[idx] == *size_riter);
+          } // if (rev_dims.size() < idx || rev_dims[idx] == 1)
+        } // for (auto size_riter = sizes.rbegin(); size_riter != sizes.rend();
+          // size_riter++, idx++)
+      } // for (Value *i : n->inputs())
+
+      // Now broadcast out the operands
+      WithInsertPoint guard(n);
+
+      std::vector<int64_t> forward_dims(rev_dims);
+      std::reverse(forward_dims.begin(), forward_dims.end());
+
+      for (size_t i = 0; i < n->inputs().size(); ++i) {
+        Value* inp = n->input(i);
+
+        auto local_sizes =
+            inp->type()->cast<TensorType>()->sizes().concrete_sizes().value();
+        auto local_strides =
+            inp->type()->cast<TensorType>()->strides().concrete_sizes().value();
+        std::reverse(local_sizes.begin(), local_sizes.end());
+
+        std::vector<int64_t> local_broadcast_dims;
+        std::vector<int64_t> new_stride;
+        for (size_t i = 0; i < rev_dims.size(); ++i) {
+          int64_t fwd_idx = rev_dims.size() - i - 1;
+          if (local_sizes.size() <= i || local_sizes[i] != rev_dims[i]) {
+            local_broadcast_dims.insert(local_broadcast_dims.begin(), fwd_idx);
+            new_stride.insert(new_stride.begin(), 0);
+          } else {
+            new_stride.insert(new_stride.begin(), local_strides[i]);
+          }
+        }
+
+        if (local_broadcast_dims.size()) {
+          Node* expand_node = graph->create(at::loop::_preexpand);
+          expand_node->addInput(inp);
+          expand_node->is_(at::attr::dims, local_broadcast_dims);
+          expand_node->output()->setType(
+              inp->type()->cast<TensorType>()->withSizesStrides(
+                  forward_dims, new_stride));
+          Value* broadcasted = graph->insertNode(expand_node)->output();
+          n->replaceInput(i, broadcasted);
+        }
+      }
+
+      n->is_(at::attr::sizes, rev_dims);
+    } // if (n->kind() == at::loop::ElementWise)
+  } // for (Node *n : graph->nodes())
 }
+
+// void ExpandLoopNest(std::shared_ptr<Graph>& graph) {
+//   for (auto n_itr = graph->nodes().begin(); n_itr != graph->nodes().end();) {
+//     Node* n = *n_itr++;
+//     if (n->kind() == at::loop::ElementWise) {
+//     }
+//   }
+// }
 
 } // namespace
 
@@ -386,9 +459,9 @@ void LoopFuser(const std::shared_ptr<Graph>& graph) {
   LowerNodes(lowered_graph);
   EliminateIdentity(lowered_graph);
   PropagateScalarTypes(lowered_graph);
-  std::cout << *lowered_graph << "\n";
   FuseElementWise(lowered_graph);
-  ExpandLoopNest(lowered_graph);
+  PrebroadcastInputs(lowered_graph);
+  // ExpandLoopNest(lowered_graph);
 
   std::cout << *lowered_graph << "\n";
 }

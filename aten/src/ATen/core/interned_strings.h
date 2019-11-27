@@ -241,6 +241,7 @@ namespace c10 {
   _(attr, scope)                     \
   _(attr, keepdims)                  \
   _(loop, ElementWise)               \
+  _(loop, _preexpand)                \
   _(scalar, add)                     \
   _(scalar, mul)                     \
   _(scalar, _float)
