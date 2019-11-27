@@ -242,9 +242,13 @@ namespace c10 {
   _(attr, keepdims)                  \
   _(loop, ElementWise)               \
   _(loop, _preexpand)                \
+  _(loop, ForRange)                  \
+  _(loop, Alloc)                     \
   _(scalar, add)                     \
   _(scalar, mul)                     \
-  _(scalar, _float)
+  _(scalar, _float)                  \
+  _(scalar, LinearIndexedRead)       \
+  _(scalar, LinearIndexedWrite)
 
 #else
 #define FORALL_NS_SYMBOLS(_) \

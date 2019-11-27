@@ -411,16 +411,17 @@ void PrebroadcastInputs(std::shared_ptr<Graph>& graph) {
         auto local_strides =
             inp->type()->cast<TensorType>()->strides().concrete_sizes().value();
         std::reverse(local_sizes.begin(), local_sizes.end());
+        std::reverse(local_strides.begin(), local_strides.end());
 
         std::vector<int64_t> local_broadcast_dims;
         std::vector<int64_t> new_stride;
         for (size_t i = 0; i < rev_dims.size(); ++i) {
           int64_t fwd_idx = rev_dims.size() - i - 1;
-          if (local_sizes.size() <= i || local_sizes[i] != rev_dims[i]) {
+          if (local_sizes.size() <= i || local_sizes.at(i) != rev_dims.at(i)) {
             local_broadcast_dims.insert(local_broadcast_dims.begin(), fwd_idx);
             new_stride.insert(new_stride.begin(), 0);
           } else {
-            new_stride.insert(new_stride.begin(), local_strides[i]);
+            new_stride.insert(new_stride.begin(), local_strides.at(i));
           }
         }
 
@@ -436,18 +437,163 @@ void PrebroadcastInputs(std::shared_ptr<Graph>& graph) {
         }
       }
 
-      n->is_(at::attr::sizes, rev_dims);
+      n->is_(at::attr::sizes, forward_dims);
     } // if (n->kind() == at::loop::ElementWise)
   } // for (Node *n : graph->nodes())
 }
 
-// void ExpandLoopNest(std::shared_ptr<Graph>& graph) {
-//   for (auto n_itr = graph->nodes().begin(); n_itr != graph->nodes().end();) {
-//     Node* n = *n_itr++;
-//     if (n->kind() == at::loop::ElementWise) {
-//     }
-//   }
-// }
+struct LoopNestInfo {
+  c10::optional<std::unordered_map<Value*, Value*>> indexes;
+  std::unordered_map<Value*, Value*> outputs;
+  Block* emit_block;
+};
+
+void ExpandElementwiseLoopNestHelper(
+    Node* n,
+    LoopNestInfo info,
+    size_t nest_level) {
+  Graph* g = n->owningGraph();
+
+  WithInsertPoint guard(info.emit_block);
+
+  std::unordered_map<Value*, Value*> next_level_indexes;
+
+  // Insert indexing computation for inputs and outputs
+  std::vector<Value*> values_to_index(n->inputs().begin(), n->inputs().end());
+  values_to_index.insert(
+      values_to_index.end(), n->outputs().begin(), n->outputs().end());
+  for (Value* val : values_to_index) {
+    const auto strides =
+        val->type()->cast<TensorType>()->strides().concrete_sizes().value();
+    int64_t this_stride = strides[nest_level];
+    Value* stride_value =
+        g->insertConstant(this_stride)
+            ->setDebugName(
+                val->debugName() + "_stride_" + std::to_string(nest_level));
+    Node* stride_mul = g->insertNode(g->create(at::scalar::mul));
+    stride_mul->addInput(info.emit_block->inputs()[0]);
+    stride_mul->addInput(stride_value);
+    stride_mul->output()->setType(IntType::get());
+
+    Value* this_index;
+    if (info.indexes) {
+      Node* add = g->insertNode(g->create(at::scalar::add));
+      add->addInput(info.indexes.value()[val]);
+      add->addInput(stride_mul->output());
+      add->output()->setType(IntType::get());
+      this_index = add->output();
+    } else {
+      this_index = stride_mul->output();
+    }
+
+    this_index->setDebugName(
+        val->debugName() + "_idx_" + std::to_string(nest_level));
+
+    next_level_indexes[val] = this_index;
+  }
+
+  if (nest_level + 1 != n->is(at::attr::sizes).size()) {
+    Node* for_range = g->insertNode(g->create(at::loop::ForRange));
+    info.emit_block = for_range->addBlock();
+    info.emit_block->addInput(
+        std::string("i") + std::to_string(nest_level + 1));
+
+    LoopNestInfo next_level_info{
+        next_level_indexes, info.outputs, for_range->blocks()[0]};
+    ExpandElementwiseLoopNestHelper(n, next_level_info, nest_level + 1);
+  } else {
+    // Index into each tensor
+
+    // Map from original block input values to the new indexed values.
+    // We use the original block inputs as a key so we can resolve new
+    // values when we clone the nodes.
+    std::unordered_map<Value*, Value*> remapped_values;
+
+    TORCH_INTERNAL_ASSERT(
+        n->inputs().size() == n->blocks()[0]->inputs().size());
+    for (size_t i = 0; i < n->inputs().size(); ++i) {
+      Value* node_input = n->input(i);
+      Value* block_input = n->blocks()[0]->inputs()[i];
+
+      Node* read_node = g->insertNode(g->create(at::scalar::LinearIndexedRead));
+      read_node->addInput(node_input);
+      read_node->addInput(next_level_indexes.at(node_input));
+      read_node->output()->copyMetadata(block_input);
+      remapped_values[block_input] = read_node->output();
+    }
+
+    std::unordered_map<Value*, Value*> orig_block_outputs_to_node_outputs;
+    TORCH_INTERNAL_ASSERT(
+        n->outputs().size() == n->blocks()[0]->outputs().size());
+    for (size_t i = 0; i < n->outputs().size(); ++i) {
+      orig_block_outputs_to_node_outputs[n->blocks()[0]->outputs()[i]] =
+          n->outputs()[i];
+    }
+
+    std::unordered_map<Value*, Value*> new_outputs;
+    for (Node* sub_node : n->blocks()[0]->nodes()) {
+      Node* new_node =
+          g->insertNode(g->createClone(sub_node, [&](Value* v) -> Value* {
+            if (remapped_values.count(v)) {
+              return remapped_values[v];
+            } else {
+              return v;
+            }
+          }));
+      for (size_t i = 0; i < sub_node->outputs().size(); i++) {
+        remapped_values[sub_node->output(i)] = new_node->output(i);
+      }
+      if (orig_block_outputs_to_node_outputs.count(sub_node->output())) {
+        new_outputs[sub_node->output()] = new_node->output();
+      }
+    }
+
+    for (const auto& kv : new_outputs) {
+      Value* orig_node_output = orig_block_outputs_to_node_outputs.at(kv.first);
+      Node* write_node =
+          g->insertNode(g->create(at::scalar::LinearIndexedWrite, 0));
+      write_node->addInput(info.outputs.at(orig_node_output));
+      write_node->addInput(next_level_indexes.at(orig_node_output));
+      write_node->addInput(kv.second);
+    }
+  }
+}
+
+// Stages:
+// 1) Create alloc nodes for each output with the proper size
+// 2) Recursively, for each iterated dimension:
+//    3) emit loop node over the size of that output dimension
+//    4) For each iterated value and output, emit indexing computation for that
+//    dimension 5) For the innermost loop:
+//        6) emit indexing expression to get concrete scalar value
+//        7) Emit loop body, mapping original block inputs to the indexed scalar
+//        vals 8) Emit output write expressions
+void ExpandLoopNest(std::shared_ptr<Graph>& graph) {
+  for (auto n_itr = graph->nodes().begin(); n_itr != graph->nodes().end();) {
+    Node* n = *n_itr++;
+    if (n->kind() == at::loop::ElementWise) {
+      WithInsertPoint guard(n);
+
+      Graph* g = n->owningGraph();
+      LoopNestInfo info;
+      // Alloc outputs
+      for (size_t i = 0; i < n->outputs().size(); ++i) {
+        Value* n_output = n->outputs()[i];
+        Value* alloced_output =
+            g->insertNode(g->create(at::loop::Alloc))->output();
+        alloced_output->copyMetadata(n_output);
+        n_output->replaceAllUsesWith(alloced_output);
+        info.outputs[n_output] = alloced_output;
+      }
+      Node* outer_for_range = g->insertNode(g->create(at::loop::ForRange));
+      info.emit_block = outer_for_range->addBlock();
+      info.emit_block->addInput("i");
+      ExpandElementwiseLoopNestHelper(n, info, 0);
+
+      n->destroy();
+    }
+  }
+}
 
 } // namespace
 
@@ -461,7 +607,7 @@ void LoopFuser(const std::shared_ptr<Graph>& graph) {
   PropagateScalarTypes(lowered_graph);
   FuseElementWise(lowered_graph);
   PrebroadcastInputs(lowered_graph);
-  // ExpandLoopNest(lowered_graph);
+  ExpandLoopNest(lowered_graph);
 
   std::cout << *lowered_graph << "\n";
 }
