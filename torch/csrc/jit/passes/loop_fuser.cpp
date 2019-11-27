@@ -147,9 +147,23 @@ void PropagateScalarTypes(std::shared_ptr<Graph>& graph) {
         switch (scalar_type) {
           case at::kInt: {
             n->blocks().at(0)->inputs()[i]->setType(IntType::get());
+            if (input->hasDebugName()) {
+              n->blocks().at(0)->inputs()[i]->setDebugName(
+                  input->debugName() + "_scalar");
+            } else {
+              n->blocks().at(0)->inputs()[i]->setDebugName(
+                  std::string("_") + input->debugName() + "_scalar");
+            }
           } break;
           case at::kFloat: {
             n->blocks().at(0)->inputs()[i]->setType(FloatType::get());
+            if (input->hasDebugName()) {
+              n->blocks().at(0)->inputs()[i]->setDebugName(
+                  input->debugName() + "_scalar");
+            } else {
+              n->blocks().at(0)->inputs()[i]->setDebugName(
+                  std::string("_") + input->debugName() + "_scalar");
+            }
           } break;
           default: {
             throw script::ErrorReport(n->sourceRange())
@@ -222,7 +236,135 @@ void EliminateIdentity(std::shared_ptr<Graph>& graph) {
 }
 
 // Fusion
-void FuseElementWise(std::shared_ptr<Graph>& graph) {}
+
+at::optional<Node*> tryFuseProducer(Node* consumer, Value* producer) {
+  if (producer->node()->kind() != at::loop::ElementWise) {
+    return c10::nullopt;
+  }
+
+  Node* producer_node = producer->node();
+
+  std::unordered_map<Value*, size_t> consumer_inputs;
+  for (size_t i = 0; i < consumer->inputs().size(); ++i) {
+    consumer_inputs[consumer->input(i)] = i;
+  }
+
+  Block* producer_block = producer_node->blocks()[0];
+  Block* consumer_block = consumer->blocks()[0];
+
+  std::unordered_map<Value*, Value*> producer_val_to_consumer_val;
+  // First, transfer the inputs of the producer over to the consumer
+  for (size_t i = 0; i < producer_node->inputs().size(); ++i) {
+    Value* producer_inp = producer_node->input(i);
+    if (consumer_inputs.count(producer_inp)) {
+      size_t idx = consumer_inputs[producer_inp];
+      producer_val_to_consumer_val[producer_block->inputs()[i]] =
+          consumer_block->inputs()[idx];
+    } else {
+      consumer->addInput(producer_inp);
+      Value* producer_block_inp = producer_node->blocks()[0]->inputs()[i];
+      Value* new_input =
+          consumer_block->addInput()->copyMetadata(producer_block_inp);
+      producer_val_to_consumer_val[producer_block->inputs()[i]] = new_input;
+    }
+  }
+
+  {
+    WithInsertPoint guard(consumer->blocks()[0]->nodes().front());
+    // Transfer all nodes and remap referenced Values
+    for (Node* prod_sub_node : producer_node->blocks()[0]->nodes()) {
+      Node* n = producer_node->owningGraph()->createClone(
+          prod_sub_node, [&](Value* k) -> Value* {
+            if (producer_val_to_consumer_val.count(k)) {
+              return producer_val_to_consumer_val.at(k);
+            } else {
+              return k;
+            }
+          });
+      n->owningGraph()->insertNode(n);
+      auto new_outputs = n->outputs();
+      auto orig_outputs = prod_sub_node->outputs();
+      for (size_t i = 0; i < new_outputs.size(); ++i) {
+        producer_val_to_consumer_val[orig_outputs[i]] = new_outputs[i];
+      }
+    }
+  }
+
+  // Transfer outputs to the consumer
+  for (size_t i = 0; i < producer_node->outputs().size(); ++i) {
+    Value* node_output = producer_node->output(i);
+    Value* block_output = producer_node->blocks()[0]->outputs()[i];
+    Value* new_block_output = producer_val_to_consumer_val.at(block_output);
+
+    std::vector<size_t> producer_value_indices;
+    for (size_t ii = 0; ii < consumer->inputs().size(); ++ii) {
+      if (consumer->input(ii) == node_output) {
+        producer_value_indices.push_back(ii);
+      }
+    }
+    for (auto riter = producer_value_indices.rbegin();
+         riter != producer_value_indices.rend();
+         riter++) {
+      auto idx = *riter;
+      consumer->blocks()[0]->inputs()[idx]->replaceAllUsesWith(
+          new_block_output);
+      consumer->blocks()[0]->eraseInput(idx);
+      consumer->removeInput(idx);
+    }
+
+    if (node_output->uses().size()) {
+      consumer->blocks()[0]->registerOutput(new_block_output);
+      node_output->replaceAllUsesWith(
+          consumer->addOutput()->copyMetadata(node_output));
+    }
+  }
+
+  producer_node->destroy();
+
+  return consumer;
+}
+
+value_list sortReverseTopological(ArrayRef<Value*> inputs, Block* nodes_block) {
+  value_list result;
+  for (auto i : inputs) {
+    if (i->node()->owningBlock() == nodes_block) {
+      result.push_back(i);
+    }
+  }
+  // Sort in reverse topological order
+  std::sort(result.begin(), result.end(), [&](Value* a, Value* b) {
+    return a->node()->isAfter(b->node());
+  });
+  return result;
+}
+
+std::tuple<graph_node_list::iterator, bool> tryFuseProducers(Node* consumer) {
+  if (consumer->kind() == at::loop::ElementWise) {
+    auto inputs =
+        sortReverseTopological(consumer->inputs(), consumer->owningBlock());
+    for (Value* producer : inputs) {
+      auto fusion_group = tryFuseProducer(consumer, producer);
+      if (fusion_group) {
+        return {fusion_group.value()->reverseIterator(), true};
+      }
+    }
+    return {++consumer->reverseIterator(), false};
+  } else {
+    return {++consumer->reverseIterator(), false};
+  }
+}
+
+void FuseElementWise(std::shared_ptr<Graph>& graph) {
+  bool any_changed = true;
+  while (any_changed) {
+    any_changed = false;
+    for (auto it = graph->nodes().rbegin(); it != graph->nodes().rend();) {
+      bool changed;
+      std::tie(it, changed) = tryFuseProducers(*it);
+      any_changed |= changed;
+    }
+  };
+}
 
 // Expand loop nest
 
@@ -244,6 +386,7 @@ void LoopFuser(const std::shared_ptr<Graph>& graph) {
   LowerNodes(lowered_graph);
   EliminateIdentity(lowered_graph);
   PropagateScalarTypes(lowered_graph);
+  std::cout << *lowered_graph << "\n";
   FuseElementWise(lowered_graph);
   ExpandLoopNest(lowered_graph);
 
