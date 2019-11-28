@@ -501,10 +501,15 @@ void ExpandElementwiseLoopNestHelper(
   }
 
   if (nest_level + 1 != n->is(at::attr::sizes).size()) {
-    Node* for_range = g->insertNode(g->create(at::loop::ForRange));
+    Value* trip_count =
+        g->insertConstant(n->is(at::attr::sizes)[nest_level + 1])
+            ->setDebugName(
+                std::string("trip_count_") + std::to_string(nest_level + 1));
+    Node* for_range = g->insertNode(g->create(at::loop::ForRange, 0));
+    for_range->addInput(trip_count);
     info.emit_block = for_range->addBlock();
-    info.emit_block->addInput(
-        std::string("i") + std::to_string(nest_level + 1));
+    info.emit_block->addInput(std::string("i") + std::to_string(nest_level + 1))
+        ->setType(IntType::get());
 
     LoopNestInfo next_level_info{
         next_level_indexes, info.outputs, for_range->blocks()[0]};
@@ -593,11 +598,26 @@ void ExpandLoopNest(std::shared_ptr<Graph>& graph) {
         n_output->replaceAllUsesWith(alloced_output);
         info.outputs[n_output] = alloced_output;
       }
-      Node* outer_for_range = g->insertNode(g->create(at::loop::ForRange));
+      Value* trip_count = g->insertConstant(n->is(at::attr::sizes)[0])
+                              ->setDebugName("trip_count_0");
+      Node* outer_for_range = g->insertNode(g->create(at::loop::ForRange, 0));
+      outer_for_range->addInput(trip_count);
       info.emit_block = outer_for_range->addBlock();
-      info.emit_block->addInput("i");
+      info.emit_block->addInput("i")->setType(IntType::get());
       ExpandElementwiseLoopNestHelper(n, info, 0);
 
+      n->destroy();
+    }
+  }
+}
+
+void ConstantNodeDCE(Block* b) {
+  for (auto n_itr = b->nodes().begin(); n_itr != b->nodes().end();) {
+    Node* n = *n_itr++;
+    for (Block* sub_b : n->blocks()) {
+      ConstantNodeDCE(sub_b);
+    }
+    if (n->kind() == prim::Constant && n->output()->uses().size() == 0) {
       n->destroy();
     }
   }
@@ -619,6 +639,7 @@ void LoopFuser(const std::shared_ptr<Graph>& graph) {
   ExpandLoopNest(lowered_graph);
   while (EliminateIdentity(lowered_graph->block()))
     ;
+  ConstantNodeDCE(lowered_graph->block());
 
   std::cout << *lowered_graph << "\n";
 }
