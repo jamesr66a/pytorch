@@ -623,6 +623,39 @@ void ConstantNodeDCE(Block* b) {
   }
 }
 
+std::vector<Node*> LICM(Block* b) {
+  for (Node* n : b->nodes()) {
+    if (n->kind() == at::loop::ForRange) {
+      auto lifted = LICM(n->blocks()[0]);
+      for (Node* l_n : lifted) {
+        l_n->moveBefore(n);
+      }
+    } // if (n->kind() == at::loop::ForRange)
+  } // for (Node *n : b->nodes())
+
+  std::vector<Node*> nodes_to_move;
+  std::unordered_set<Value*> moved_values;
+
+  for (Node* n : b->nodes()) {
+    if (n->kind() != at::loop::ForRange) {
+      bool liftable = true;
+      for (Value* i : n->inputs()) {
+        if (i->node()->owningBlock() == n->owningBlock() &&
+            !moved_values.count(i)) {
+          liftable = false;
+        } // if (i->node()->owningBlock() == n->owningBlock() &&
+          // !moved_values.count(i))
+      } // for (Value *i : n->inputs())
+      if (liftable) {
+        nodes_to_move.push_back(n);
+        moved_values.insert(n->outputs().begin(), n->outputs().end());
+      } // if (liftable)
+    } // if (n->kind() != at::loop::ForRange())
+  } // for (Node *n : b->nodes())
+
+  return nodes_to_move;
+}
+
 } // namespace
 
 void LoopFuser(const std::shared_ptr<Graph>& graph) {
@@ -640,6 +673,7 @@ void LoopFuser(const std::shared_ptr<Graph>& graph) {
   while (EliminateIdentity(lowered_graph->block()))
     ;
   ConstantNodeDCE(lowered_graph->block());
+  LICM(lowered_graph->block()).size();
 
   std::cout << *lowered_graph << "\n";
 }
