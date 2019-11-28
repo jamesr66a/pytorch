@@ -207,32 +207,40 @@ c10::optional<size_t> probeIdentityValue(Node* n, double ident_value) {
 }
 
 // Some optimization
-void EliminateIdentity(std::shared_ptr<Graph>& graph) {
-  for (Node* n : graph->nodes()) {
-    if (n->kind() == at::loop::ElementWise) {
-      Block* b = n->blocks()[0];
-      for (auto sub_n_itr = b->nodes().begin();
-           sub_n_itr != b->nodes().end();) {
-        Node* sub_n = *sub_n_itr++;
-        switch (sub_n->kind()) {
-          case at::scalar::add: {
-            if (auto zero_idx = probeIdentityValue(sub_n, 0.0)) {
-              sub_n->output()->replaceAllUsesWith(
-                  zero_idx.value() ? sub_n->input(0) : sub_n->input(1));
-              sub_n->destroy();
-            }
-          } break;
-          case at::scalar::mul: {
-            if (auto zero_idx = probeIdentityValue(sub_n, 1.0)) {
-              sub_n->output()->replaceAllUsesWith(
-                  zero_idx.value() ? sub_n->input(0) : sub_n->input(1));
-              sub_n->destroy();
-            }
-          } break;
-        }
-      }
+bool EliminateIdentity(Block* b) {
+  bool changed = false;
+  for (auto n_itr = b->nodes().begin(); n_itr != b->nodes().end();) {
+    Node* n = *n_itr++;
+
+    for (Block* sub_block : n->blocks()) {
+      changed |= EliminateIdentity(sub_block);
     }
-  }
+
+    switch (n->kind()) {
+      case at::scalar::add: {
+        if (auto zero_idx = probeIdentityValue(n, 0.0)) {
+          n->output()->replaceAllUsesWith(
+              zero_idx.value() ? n->input(0) : n->input(1));
+          n->destroy();
+          changed = true;
+        }
+      } break;
+      case at::scalar::mul: {
+        if (auto one_idx = probeIdentityValue(n, 1.0)) {
+          n->output()->replaceAllUsesWith(
+              one_idx.value() ? n->input(0) : n->input(1));
+          n->destroy();
+          changed = true;
+        }
+        if (auto zero_idx = probeIdentityValue(n, 0.0)) {
+          n->output()->replaceAllUsesWith(n->input(zero_idx.value()));
+          n->destroy();
+          changed = true;
+        }
+      } break;
+    } // switch (sub_n->kind())
+  } // for (auto sub_n_itr = b->nodes().begin(); sub_n_itr != b->nodes().end();)
+  return changed;
 }
 
 // Fusion
@@ -603,11 +611,14 @@ void LoopFuser(const std::shared_ptr<Graph>& graph) {
   std::cout << *graph << std::endl;
 
   LowerNodes(lowered_graph);
-  EliminateIdentity(lowered_graph);
+  while (EliminateIdentity(lowered_graph->block()))
+    ;
   PropagateScalarTypes(lowered_graph);
   FuseElementWise(lowered_graph);
   PrebroadcastInputs(lowered_graph);
   ExpandLoopNest(lowered_graph);
+  while (EliminateIdentity(lowered_graph->block()))
+    ;
 
   std::cout << *lowered_graph << "\n";
 }
