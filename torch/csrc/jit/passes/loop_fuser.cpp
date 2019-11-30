@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/irparser.h>
 #include <torch/csrc/jit/script/error_report.h>
 
+#include <asmjit/asmjit.h>
+
 namespace torch {
 namespace jit {
 namespace passes {
@@ -656,6 +658,60 @@ std::vector<Node*> LICM(Block* b) {
   return nodes_to_move;
 }
 
+struct InputDescr {
+  std::vector<at::Tensor> constants;
+  std::vector<at::Tensor> outputs;
+};
+
+void ExtractInputsHelper(Block* b, InputDescr& descr) {
+  for (auto n_itr = b->nodes().begin(); n_itr != b->nodes().end();) {
+    Node* n = *n_itr++;
+
+    if (n->kind() == at::prim::Constant &&
+        n->kindOf(at::attr::value) == AttributeKind::t) {
+      Value* const_input =
+          b->owningGraph()->addInput()->copyMetadata(n->output());
+      n->output()->replaceAllUsesWith(const_input);
+      descr.constants.push_back(n->t(at::attr::value));
+      n->destroy();
+    }
+
+    if (n->kind() == at::loop::Alloc) {
+      Value* alloc_input =
+          b->owningGraph()->addInput()->copyMetadata(n->output());
+      n->output()->replaceAllUsesWith(alloc_input);
+      TensorTypePtr output_type = n->output()->type()->cast<TensorType>();
+      auto sizes = output_type->sizes().concrete_sizes().value();
+      auto strides = output_type->strides().concrete_sizes().value();
+      at::TensorOptions options;
+      options.device(output_type->device().value());
+      options.dtype(output_type->scalarType().value());
+      descr.outputs.push_back(at::empty_strided(sizes, strides, options));
+      n->destroy();
+    }
+
+    for (Block* sub_b : n->blocks()) {
+      ExtractInputsHelper(sub_b, descr);
+    }
+  }
+}
+
+InputDescr ExtractInputs(const std::shared_ptr<Graph>& graph) {
+  InputDescr descr;
+  ExtractInputsHelper(graph->block(), descr);
+  return descr;
+}
+
+void StripPreExpand(Block* b) {
+  for (auto n_itr = b->nodes().begin(); n_itr != b->nodes().end();) {
+    Node* n = *n_itr++;
+    if (n->kind() == at::loop::_preexpand) {
+      n->output()->replaceAllUsesWith(n->input());
+      n->destroy();
+    }
+  }
+}
+
 } // namespace
 
 void LoopFuser(const std::shared_ptr<Graph>& graph) {
@@ -673,7 +729,9 @@ void LoopFuser(const std::shared_ptr<Graph>& graph) {
   while (EliminateIdentity(lowered_graph->block()))
     ;
   ConstantNodeDCE(lowered_graph->block());
-  LICM(lowered_graph->block()).size();
+  LICM(lowered_graph->block());
+  ExtractInputs(lowered_graph);
+  StripPreExpand(lowered_graph->block());
 
   std::cout << *lowered_graph << "\n";
 }
