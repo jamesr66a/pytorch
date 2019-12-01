@@ -718,7 +718,7 @@ void Emitx86(Block* b, asmjit::x86::Compiler& cc, ValueMap& value_map);
 void EmitConstant(Node* n, asmjit::x86::Compiler& cc, ValueMap& vm) {
   switch (n->kindOf(at::attr::value)) {
     case AttributeKind::i: {
-      asmjit::x86::Gp operand = cc.newGpq(n->output()->debugName().c_str());
+      asmjit::x86::Gp operand = cc.newGpd(n->output()->debugName().c_str());
       cc.mov(operand, n->i(at::attr::value));
       vm[n->output()] = operand;
     }; break;
@@ -768,7 +768,7 @@ void EmitLoopForRange(Node* n, asmjit::x86::Compiler& cc, ValueMap& vm) {
   vm[index_val] = index;
 
   // Loop setup
-  cc.mov(index, vm.at(n->input(0)).as<asmjit::x86::Gp>());
+  cc.mov(index, 0);
   asmjit::Label loop = cc.newLabel();
   cc.bind(loop);
 
@@ -879,6 +879,8 @@ void Emitx86(Block* b, asmjit::x86::Compiler& cc, ValueMap& value_map) {
   for (Node* n : b->nodes()) {
     if (gen_table.count(n->kind())) {
       gen_table[n->kind()](n, cc, value_map);
+    } else {
+      throw script::ErrorReport(n->sourceRange()) << "NYI";
     }
   }
 }
@@ -906,12 +908,14 @@ void Emitx86(const std::shared_ptr<Graph>& graph) {
       ret_args.data() + 1,
       ret_args.size() - 1);
 
+  cc.addFunc(sig);
+
   // Instantiate input/output pointers and associate to Value*'s
   for (size_t i = 0; i < graph->inputs().size(); ++i) {
     Value* input = graph->inputs()[i];
     // TODO: is this right?
     value_map[input] = cc.newIntPtr(input->debugName().c_str());
-    cc.setArg(i + 1, value_map[input]);
+    cc.setArg(i, value_map[input]);
   }
 
   Emitx86(graph->block(), cc, value_map);
@@ -920,6 +924,48 @@ void Emitx86(const std::shared_ptr<Graph>& graph) {
   cc.finalize();
 
   dumpCode(cc);
+
+  // REMOVE
+
+  auto a = at::rand({3, 4});
+  float* a_data = (float*)a.data_ptr();
+  auto b = at::ones({3, 1}, at::kInt);
+  int* b_data = (int*)b.data_ptr();
+  auto c = at::rand({4});
+  float* c_data = (float*)c.data_ptr();
+  auto d = at::rand({1});
+  float* d_data = (float*)d.data_ptr();
+  auto e = at::zeros({3, 4});
+  float* e_data = (float*)e.data_ptr();
+
+  void (*func)(float*, int*, float*, float*, float*) = nullptr;
+  asmjit::Error err = jit.add(&func, &code);
+  if (err) {
+    throw script::ErrorReport() << "asmjit returned error " << err;
+  }
+
+  func(a_data, b_data, c_data, d_data, e_data);
+
+  auto ref = at::add(a, b);
+  ref = at::add(d, ref, 1.3);
+  ref = at::add(ref, c);
+
+  std::cout << "result\n";
+  auto e_accessor = e.accessor<float, 2>();
+  for (size_t i = 0; i < 3; ++i) {
+    for (size_t j = 0; j < 4; ++j) {
+      std::cout << e_accessor[i][j] << " ";
+    }
+    std::cout << "\n";
+  }
+  std::cout << "ref\n";
+  auto ref_accessor = ref.accessor<float, 2>();
+  for (size_t i = 0; i < 3; ++i) {
+    for (size_t j = 0; j < 4; ++j) {
+      std::cout << ref_accessor[i][j] << " ";
+    }
+    std::cout << "\n";
+  }
 }
 
 } // namespace
