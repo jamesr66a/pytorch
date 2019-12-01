@@ -712,6 +712,216 @@ void StripPreExpand(Block* b) {
   }
 }
 
+using ValueMap = std::unordered_map<Value*, asmjit::x86::Reg>;
+void Emitx86(Block* b, asmjit::x86::Compiler& cc, ValueMap& value_map);
+
+void EmitConstant(Node* n, asmjit::x86::Compiler& cc, ValueMap& vm) {
+  switch (n->kindOf(at::attr::value)) {
+    case AttributeKind::i: {
+      asmjit::x86::Gp operand = cc.newGpq(n->output()->debugName().c_str());
+      cc.mov(operand, n->i(at::attr::value));
+      vm[n->output()] = operand;
+    }; break;
+    case AttributeKind::f: {
+      asmjit::x86::Xmm operand = cc.newXmm(n->output()->debugName().c_str());
+      asmjit::x86::Mem c0 = cc.newFloatConst(
+          asmjit::ConstPool::kScopeLocal, n->f(at::attr::value));
+      cc.vmovss(operand, c0);
+      vm[n->output()] = operand;
+    } break;
+    default: {
+      throw script::ErrorReport(n->sourceRange()) << "Unknown constant kind!";
+    }
+  }
+}
+
+void EmitLinearIndexedRead(Node* n, asmjit::x86::Compiler& cc, ValueMap& vm) {
+  if (n->output()->type() == IntType::get()) {
+    asmjit::x86::Mem src = asmjit::x86::ptr(
+        vm.at(n->input(0)).as<asmjit::x86::Gp>(),
+        vm.at(n->input(1)).as<asmjit::x86::Gp>(),
+        2);
+    vm[n->output()] = cc.newGpd(n->output()->debugName().c_str());
+    cc.mov(vm[n->output()].as<asmjit::x86::Gp>(), src);
+  } else if (n->output()->type() == FloatType::get()) {
+    asmjit::x86::Mem src = asmjit::x86::ptr(
+        vm.at(n->input(0)).as<asmjit::x86::Gp>(),
+        vm.at(n->input(1)).as<asmjit::x86::Gp>(),
+        2);
+    vm[n->output()] = cc.newXmm(n->output()->debugName().c_str());
+    cc.vmovss(vm[n->output()].as<asmjit::x86::Xmm>(), src);
+  } else {
+    throw script::ErrorReport(n->sourceRange())
+        << "Unknown type for linear indexed read!";
+  }
+}
+
+void EmitLoopForRange(Node* n, asmjit::x86::Compiler& cc, ValueMap& vm) {
+  // Jump to end if trip count is 0
+  asmjit::Label end = cc.newLabel();
+  cc.cmp(vm.at(n->input()).as<asmjit::x86::Gp>(), 0);
+  cc.je(end);
+
+  // Create index variable
+  Value* index_val = n->blocks().at(0)->inputs().at(0);
+  asmjit::x86::Gp index = cc.newGpd(index_val->debugName().c_str());
+  vm[index_val] = index;
+
+  // Loop setup
+  cc.mov(index, vm.at(n->input(0)).as<asmjit::x86::Gp>());
+  asmjit::Label loop = cc.newLabel();
+  cc.bind(loop);
+
+  // Emit loop body
+  Emitx86(n->blocks().at(0), cc, vm);
+
+  // Emit back-edge
+  cc.add(index, 1);
+  cc.cmp(index, vm.at(n->input(0)).as<asmjit::x86::Gp>());
+  cc.jne(loop);
+  cc.bind(end);
+}
+
+void EmitScalarMul(Node* n, asmjit::x86::Compiler& cc, ValueMap& vm) {
+  if (n->output()->type() == IntType::get()) {
+    asmjit::x86::Gp product = cc.newGpd(n->output()->debugName().c_str());
+    vm[n->output()] = product;
+    cc.mov(product, vm.at(n->input(0)).as<asmjit::x86::Gp>());
+    cc.imul(product, vm.at(n->input(1)).as<asmjit::x86::Gp>());
+  } else if (n->output()->type() == FloatType::get()) {
+    asmjit::x86::Xmm product = cc.newXmm(n->output()->debugName().c_str());
+    vm[n->output()] = product;
+    cc.vmulss(
+        product,
+        vm.at(n->input(0)).as<asmjit::x86::Xmm>(),
+        vm.at(n->input(1)).as<asmjit::x86::Xmm>());
+  } else {
+    throw script::ErrorReport(n->sourceRange())
+        << "Unknown output type for scalar mul!";
+  }
+}
+
+void EmitScalarAdd(Node* n, asmjit::x86::Compiler& cc, ValueMap& vm) {
+  if (n->output()->type() == IntType::get()) {
+    asmjit::x86::Gp sum = cc.newGpd(n->output()->debugName().c_str());
+    vm[n->output()] = sum;
+    cc.mov(sum, vm.at(n->input(0)).as<asmjit::x86::Gp>());
+    cc.add(sum, vm.at(n->input(1)).as<asmjit::x86::Gp>());
+  } else if (n->output()->type() == FloatType::get()) {
+    asmjit::x86::Xmm sum = cc.newXmm(n->output()->debugName().c_str());
+    vm[n->output()] = sum;
+    cc.vaddss(
+        sum,
+        vm.at(n->input(0)).as<asmjit::x86::Xmm>(),
+        vm.at(n->input(1)).as<asmjit::x86::Xmm>());
+  } else {
+    throw script::ErrorReport(n->sourceRange())
+        << "Unknown output type for scalar mul!";
+  }
+}
+
+void EmitCastToFloat(Node* n, asmjit::x86::Compiler& cc, ValueMap& vm) {
+  if (n->input()->type() == IntType::get()) {
+    asmjit::x86::Xmm cvted = cc.newXmm(n->output()->debugName().c_str());
+    vm[n->output()] = cvted;
+    cc.cvtsi2ss(cvted, vm.at(n->input()).as<asmjit::x86::Gp>());
+  } else {
+    throw script::ErrorReport(n->sourceRange())
+        << "Unknown input type for float conversion!";
+  }
+}
+
+void EmitLinearIndexedWrite(Node* n, asmjit::x86::Compiler& cc, ValueMap& vm) {
+  Value* dst_value = n->input(0);
+  Value* idx_value = n->input(1);
+  Value* to_write = n->input(2);
+  if (to_write->type() == IntType::get()) {
+    TORCH_INTERNAL_ASSERT(
+        dst_value->type()->cast<TensorType>()->scalarType() == at::kInt);
+    asmjit::x86::Mem dst = asmjit::x86::ptr(
+        vm.at(dst_value).as<asmjit::x86::Gp>(),
+        vm.at(idx_value).as<asmjit::x86::Gp>(),
+        2);
+    cc.mov(dst, vm.at(to_write).as<asmjit::x86::Gp>());
+  } else if (to_write->type() == FloatType::get()) {
+    TORCH_INTERNAL_ASSERT(
+        dst_value->type()->cast<TensorType>()->scalarType() == at::kFloat);
+    asmjit::x86::Mem dst = asmjit::x86::ptr(
+        vm.at(dst_value).as<asmjit::x86::Gp>(),
+        vm.at(idx_value).as<asmjit::x86::Gp>(),
+        2);
+    cc.vmovss(dst, vm.at(to_write).as<asmjit::x86::Xmm>());
+  } else {
+    throw script::ErrorReport(n->sourceRange())
+        << "Unknown type for linear indexed write!";
+  }
+}
+
+std::unordered_map<Symbol, void (*)(Node*, asmjit::x86::Compiler&, ValueMap&)>
+    gen_table = {{at::prim::Constant, EmitConstant},
+                 {at::scalar::LinearIndexedRead, EmitLinearIndexedRead},
+                 {at::loop::ForRange, EmitLoopForRange},
+                 {at::scalar::mul, EmitScalarMul},
+                 {at::scalar::add, EmitScalarAdd},
+                 {at::scalar::_float, EmitCastToFloat},
+                 {at::scalar::LinearIndexedWrite, EmitLinearIndexedWrite}};
+
+static void dumpCode(asmjit::BaseBuilder& cb) {
+  asmjit::String sb;
+  cb.dump(sb);
+  printf("%s\n", sb.data());
+}
+
+//!!!!!!! TODO !!!!!!
+// cpuid
+
+void Emitx86(Block* b, asmjit::x86::Compiler& cc, ValueMap& value_map) {
+  for (Node* n : b->nodes()) {
+    if (gen_table.count(n->kind())) {
+      gen_table[n->kind()](n, cc, value_map);
+    }
+  }
+}
+
+void Emitx86(const std::shared_ptr<Graph>& graph) {
+  asmjit::JitRuntime jit;
+  asmjit::CodeHolder code;
+
+  code.init(jit.codeInfo());
+  asmjit::x86::Compiler cc(&code);
+
+  std::unordered_map<Value*, asmjit::x86::Reg> value_map;
+
+  asmjit::FuncSignature sig;
+  std::vector<uint8_t> ret_args;
+  // Register pointer args
+  ret_args.push_back(asmjit::Type::IdOfT<void>::kTypeId);
+  for (Value* input : graph->inputs()) {
+    ret_args.push_back(asmjit::Type::IdOfT<float*>::kTypeId);
+  }
+  sig.init(
+      asmjit::CallConv::kIdHost,
+      asmjit::FuncSignature::kNoVarArgs,
+      ret_args[0],
+      ret_args.data() + 1,
+      ret_args.size() - 1);
+
+  // Instantiate input/output pointers and associate to Value*'s
+  for (size_t i = 0; i < graph->inputs().size(); ++i) {
+    Value* input = graph->inputs()[i];
+    // TODO: is this right?
+    value_map[input] = cc.newIntPtr(input->debugName().c_str());
+    cc.setArg(i + 1, value_map[input]);
+  }
+
+  Emitx86(graph->block(), cc, value_map);
+
+  cc.endFunc();
+  cc.finalize();
+
+  dumpCode(cc);
+}
+
 } // namespace
 
 void LoopFuser(const std::shared_ptr<Graph>& graph) {
@@ -734,6 +944,8 @@ void LoopFuser(const std::shared_ptr<Graph>& graph) {
   StripPreExpand(lowered_graph->block());
 
   std::cout << *lowered_graph << "\n";
+
+  Emitx86(lowered_graph);
 }
 
 } // namespace passes
